@@ -15,6 +15,8 @@ This is a ledger that records accounting information. It keeps a record of entri
 
 Reconciliation, notifications, containerization, multiple account identifier types, and cross-currency transfers (a transfer between accounts of different currencies is rejected).
 
+v1 supports currencies with two decimal places only; account creation rejects others.
+
 ## 2. Core concepts and entities
 
 **Q: What are the core entities? For each entity: what uniquely identifies it, and what state can it be in?**
@@ -224,12 +226,13 @@ ledger_entries(account_id, created_at) — balance derivation (enquiry) is the h
 | 10 | Client timestamps | Accept from request vs server-assigned | Server-assigned | A ledger's ordering of events is its truth; the client cannot be allowed to set it |
 | 11 | Notifications | Inside vs outside the db transaction | Outside | A flaky side-effect must not hold money-truth hostage; outbox pattern noted as the future fix |
 | 12 | Identity data (BVN/NIN) | Store in ledger vs references only | References only | Identity documents have different retention, access, and regulatory rules; they never appear in the ledger or its logs |
+| 13 | Amount storage type | decimal(18,2) vs minor-unit integers | decimal(18,2) | v1 is NGN-scoped; minor units noted as the migration path if multi-exponent currencies arrive |
 
 ## 10. Open questions / next steps
 
 **Q: List everything you couldn't answer confidently.**
 
-- Detailed EF Core mapping of the schema (types, precision for amount, enum handling for entry_type and status).
+- Detailed EF Core mapping of the schema (types, enum handling for entry_type and status).
 - Hotspot mitigation beyond v1 (durable queue such as Kafka in front of hot accounts).
 - Outbox pattern for reliable notifications.
 - There are certainly things I am not yet aware of; this document is expected to evolve during implementation, with changes recorded in the decisions log.
