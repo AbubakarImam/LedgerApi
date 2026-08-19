@@ -17,11 +17,13 @@ Reconciliation, notifications, containerization, multiple account identifier typ
 
 v1 supports currencies with two decimal places only; account creation rejects others.
 
+v1 includes account creation and a mock funding (deposit) flow.
+
 ## 2. Core concepts and entities
 
 **Q: What are the core entities? For each entity: what uniquely identifies it, and what state can it be in?**
 
-- **Account:** id, account number (unique), name, account type, currency, status.
+- **Account:** id, account number (unique), name, account type, currency, status, account_class (CUSTOMER or SYSTEM — system accounts represent money entering the ledger from outside, e.g. a treasury/world account).
 - **Transaction (envelope):** identified by id, reference (unique), and idempotency key (unique). States: pending / success / failed. It encompasses all the details for a transaction — reference, status, narration, who initiated it — but does not hold account numbers or amounts.
 - **Entry:** an individual account movement. Each entry belongs to a transaction and records one account, an amount, and a direction (debit or credit). Entries are immutable — they have no state changes after insert.
 - **Reversal:** identified by id; unique per original transaction. References the original transaction and is written together with new forward entries.
@@ -34,6 +36,16 @@ The transaction encompasses the whole operation — both accounts involved, narr
 **Q: Can an Account's balance be a stored column, or must it be derived from entries? What breaks under the other choice?**
 
 Balance is never a stored column. Balance is always derived from the entries written. A stored column would not show the history of transactions, and derivation is what makes reversals work cleanly — a reversal is just more entries, and the balance stays correct by construction.
+
+**Q: What states can an Account be in, and what can happen in each state? Can an account be deleted?**
+
+Status lifecycle: ACTIVE / FROZEN / BLOCKED.
+
+- **ACTIVE:** can be debited and credited.
+- **FROZEN:** can be credited, cannot be debited.
+- **BLOCKED:** cannot be credited or debited.
+
+Accounts can never be deleted — entries are immutable and history must stay true. Closure is only a status change, never a row removal.
 
 ## 3. Double-entry rules
 
@@ -60,10 +72,11 @@ Reversals write a new row in the reversals table and new forward entries, like a
 The chosen flow, in order:
 
 1. Lock the source account row (SELECT ... FOR UPDATE) for the account involved in the transaction.
-2. Derive the balance by summing committed entries.
-3. Run business logic checks — sufficient balance, same currency, and other rules.
-4. Append the entries and the transaction envelope.
-5. Commit — the lock is released.
+2. Check account status for both source and destination — before deriving any balance. Status checks run first because deriving a balance is work, and if the status check will reject the transfer anyway, deriving first is work performed and then discarded.
+3. Derive the balance by summing committed entries.
+4. Run business logic checks — for CUSTOMER accounts, the derived balance must be ≥ the amount. For SYSTEM accounts, the check is against an overdraft floor instead: (balance − amount) must be ≥ −1,000,000,000,000 (negative one trillion) — a system account may go negative down to the floor, since a negative system balance correctly represents money the outside world has pushed into the ledger. Same-currency and other rules also run here.
+5. Append the entries and the transaction envelope.
+6. Commit — the lock is released.
 
 The second concurrent transfer blocks at step 1 and waits. When the first transfer commits, the second wakes, derives a fresh balance that includes the first transfer's entries, and fails its check on correct data. Overdraft is impossible.
 
@@ -82,6 +95,12 @@ The hotspot account load pattern makes this hurt: a very high number of transfer
 Serializable was the closest second option. With Serializable, the balance derivation is work that gets performed and then discarded when the engine aborts the losing transaction, and the whole transfer must be retried — on a hotspot account this becomes an abort-retry storm where total work far exceeds the number of transfers. With the row lock, the second request waits without performing any action until the first commits — blocks postpone unstarted work; aborts waste completed work.
 
 The per-account in-memory queue was also rejected as a correctness mechanism: a queue lives in memory in one process. It fails when there is more than one server, and it vanishes on restart. Correctness must live in the database. The queue idea survives only as a possible throughput optimization.
+
+**Q: Is the destination account locked too? What happens when a deposit and a withdrawal race on the same destination account?**
+
+The destination account is not locked. Its status is read inside the database transaction (Read Committed, committed truth) without FOR UPDATE. The source lock exists to protect a decision made on a derived read — sum the entries, then judge against the sum — which a concurrent append could invalidate; that is a genuine correctness anomaly. The destination check, by contrast, is a read of a single existing row's column, where no phantom is possible. Locking the destination too would double the lock acquisitions per transfer, serialize all transfers into popular accounts, and make the two-lock deadlock scenario a routine code path — without even eliminating the timing-dependent outcome it targets, since it would only change which race decides it.
+
+Worked example: a deposit into Account B and a withdrawal from Account B race. The withdrawal may derive its balance before the deposit's entries are visible, and reject on the pre-deposit balance. The final state is equivalent to the serial order "withdrawal first, then deposit" — and violates nothing. The distinction that matters: a **correctness anomaly** is money computed wrong or an invariant broken (locks exist to prevent this); a **serialization artifact** is a valid outcome that timing happened to decide (no lock can prevent this, only reorder it — and reordering isn't free). The rejected withdrawal still commits with its stored failure response, per decision #6, and the client may retry as a new transaction with a new idempotency key.
 
 ## 5. Idempotency
 
@@ -109,11 +128,17 @@ Client retry contract: on a 500 or timeout, the client retries with the identica
 
 **Q: List the endpoints for v1.**
 
-Transfer, reversal, balance enquiry, account enquiry.
+Transfer, reversal, balance enquiry, account enquiry, account creation, mock funding (deposit).
 
 **Q: For the transfer endpoint specifically: write out the request body and the success response body.**
 
 Request body: debit account, credit account, amount, narration, idempotency key. Time is not accepted from the client — the server assigns created_at; a ledger's ordering of events is its truth. Success response: status 200 with the transaction reference.
+
+**Q: For the account creation and mock funding endpoints specifically: what do they do?**
+
+`POST /accounts` creates an account (name, type, currency, account_class). The server generates the account number and id; status starts ACTIVE; created_at is server-assigned. On the rare random account-number collision, the unique constraint rejects the insert and the server regenerates and retries — the same contested-creation pattern as the idempotency key.
+
+`POST /deposits` (mock funding) accepts a customer account, amount, and narration. No client timestamp — the server assigns time everywhere, including mocks (decision #10 applies with equal force). Internally it executes a normal transfer: debit the system account, credit the customer account. It reuses the transfer service wholesale — funding introduces no new mechanics; the double-entry invariant, idempotency, and locking are inherited for free.
 
 **Q: What does the API return when a transfer fails for insufficient funds? What HTTP status, and why that one?**
 
@@ -152,8 +177,9 @@ Notifications (SMS/email) happen outside the database transaction. A flaky side-
 | account_number | **UNIQUE** |
 | account_name | |
 | account_type | |
+| account_class | CHECK: 'CUSTOMER' or 'SYSTEM' |
 | currency_code | |
-| status | |
+| status | CHECK: 'ACTIVE', 'FROZEN', or 'BLOCKED' |
 | user_id | |
 | created_at | server-assigned |
 
@@ -176,8 +202,8 @@ Notifications (SMS/email) happen outside the database transaction. A flaky side-
 | transaction_id | FK → transactions |
 | account_id | FK → accounts |
 | entry_type | CHECK: 'DEBIT' or 'CREDIT' only |
-| amount | CHECK: amount > 0 — direction lives in entry_type; balance = SUM(credits) − SUM(debits) |
-| currency | must equal the account's currency, validated inside the transaction (Section 4, step 3) |
+| amount | CHECK: amount > 0 — direction lives in entry_type; balance = SUM(credits) − SUM(debits). decimal(18,2), consistent with the two-decimal-currency scope (Section 1). |
+| currency | must equal the account's currency, validated inside the transaction (Section 4, step 4) |
 | created_at | server-assigned |
 
 **reversals**
@@ -227,6 +253,11 @@ ledger_entries(account_id, created_at) — balance derivation (enquiry) is the h
 | 11 | Notifications | Inside vs outside the db transaction | Outside | A flaky side-effect must not hold money-truth hostage; outbox pattern noted as the future fix |
 | 12 | Identity data (BVN/NIN) | Store in ledger vs references only | References only | Identity documents have different retention, access, and regulatory rules; they never appear in the ledger or its logs |
 | 13 | Amount storage type | decimal(18,2) vs minor-unit integers | decimal(18,2) | v1 is NGN-scoped; minor units noted as the migration path if multi-exponent currencies arrive |
+| 14 | System-account balance rule | Skip check vs overdraft floor | Overdraft floor of −1 trillion | The check applies to all accounts uniformly but system accounts check against the floor, not zero; a paradox-free way to let money enter the ledger while still bounding treasury exposure |
+| 15 | Funding flow | New deposit mechanics vs reuse transfer | Mock deposit endpoint that internally runs a normal transfer (system → customer) | Funding introduces no new mechanics; invariant, idempotency, and locking are inherited |
+| 16 | Account deletion | Hard delete vs status change | Status change only (ACTIVE/FROZEN/BLOCKED) | Entries are immutable; deleting an account with history would make the ledger lie |
+| 17 | Status check ordering | Before vs after balance derivation | Before | Deriving a balance that a status rejection will discard is wasted work |
+| 18 | Destination account locking | FOR UPDATE vs unlocked read inside the transaction | Unlocked read | The destination check is a single-row column read — no phantom possible; the lock would tax every transfer and make two-lock deadlocks routine while only reshuffling a serialization artifact, not preventing a correctness anomaly |
 
 ## 10. Open questions / next steps
 
