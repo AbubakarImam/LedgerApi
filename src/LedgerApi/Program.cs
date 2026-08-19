@@ -1,4 +1,8 @@
+using LedgerApi.Auditing;
+using LedgerApi.Authorization;
 using LedgerApi.Data;
+using LedgerApi.Middleware;
+using LedgerApi.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,6 +18,12 @@ builder.Services.AddDbContext<LedgerDbContext>(options => options
     .UseNpgsql(builder.Configuration.GetConnectionString("LedgerDb"))
     .UseSnakeCaseNamingConvention());
 
+builder.Services.AddScoped<ITransferService, TransferService>();
+builder.Services.AddScoped<IReversalService, ReversalService>();
+builder.Services.AddScoped<IAccountService, AccountService>();
+builder.Services.AddScoped<IMandateService, MandateService>();
+builder.Services.AddScoped<IAuditLogger, AuditLogger>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -22,6 +32,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseHttpsRedirection();
 
