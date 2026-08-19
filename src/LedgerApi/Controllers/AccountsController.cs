@@ -1,3 +1,4 @@
+using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -8,6 +9,15 @@ namespace LedgerApi.Controllers;
 [Route("api/[controller]")]
 public class AccountsController(IAccountService accountService) : ControllerBase
 {
+    [HttpPost]
+    public async Task<ActionResult<AccountResponse>> CreateAccount(
+        [FromBody] CreateAccountRequest request,
+        CancellationToken cancellationToken)
+    {
+        var account = await accountService.CreateAccountAsync(request, cancellationToken);
+        return Ok(account);
+    }
+
     [HttpGet("{accountNumber}")]
     public async Task<ActionResult<AccountResponse>> GetAccount(
         string accountNumber,

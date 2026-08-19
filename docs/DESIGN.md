@@ -29,6 +29,8 @@ v1 includes account creation and a mock funding (deposit) flow.
 - **Reversal:** identified by id; unique per original transaction. References the original transaction and is written together with new forward entries.
 - **Mandate:** the ledger does not hold identity information (email, BVN, NIN). It only saves references that the mandate system can use to query. Identity data has different retention, access, and regulatory rules and lives outside the ledger.
 
+`account_type` (savings/current/wallet, etc.) is descriptive only in v1 — no business rule reads it. All behavior keys off `account_class` and `status`. This is stated explicitly so the column is not mistaken for forgotten logic.
+
 **Q: What is the difference between a Transaction and an Entry in a double-entry system? Why does that difference exist?**
 
 The transaction encompasses the whole operation — both accounts involved, narration, status, and other information. An entry records one individual account movement with a direction. The difference exists so that the operation (the envelope) and the account-level facts (the entries) each live in exactly one place.
@@ -136,7 +138,9 @@ Request body: debit account, credit account, amount, narration, idempotency key.
 
 **Q: For the account creation and mock funding endpoints specifically: what do they do?**
 
-`POST /accounts` creates an account (name, type, currency, account_class). The server generates the account number and id; status starts ACTIVE; created_at is server-assigned. On the rare random account-number collision, the unique constraint rejects the insert and the server regenerates and retries — the same contested-creation pattern as the idempotency key.
+`POST /accounts` creates CUSTOMER accounts only — any `account_class` field in the payload is rejected. `POST /admin/system-accounts` creates SYSTEM accounts under stricter authorization (v1: a separate route, with the auth requirement itself noted as a TODO). Account class is a privilege boundary — a SYSTEM account can go negative to the overdraft floor, so creating one is an administrative act — and privilege boundaries live in routes and authorization, never in payload fields.
+
+Both endpoints generate the account number and id server-side; status starts ACTIVE; created_at is server-assigned. Customer account numbers are 10-digit numeric, randomly generated — never sequential, since sequential numbers would let someone enumerate the customer base. No information is encoded in the digits; currency and type live only in their own columns. The first digit is never 0, so the number survives an accidental string-to-integer conversion in a downstream system at full length. System account numbers are alphanumeric, beginning with the ISO currency code, followed by a structured, self-describing suffix (e.g. `NGN-TREASURY-01`) — system accounts are few, are read by humans in logs and ops tooling for years, and must be impossible to fat-finger as a customer number; the alphanumeric format cannot even parse as a customer number, so the format itself acts as a validation layer. The prefix is generated from the `currency_code` column at creation and is never parsed for business logic afterward — the column remains the only authoritative source. On the rare account-number collision, the unique constraint rejects the insert and the server regenerates and retries — the same contested-creation pattern already used for the idempotency key.
 
 `POST /deposits` (mock funding) accepts a customer account, amount, and narration. No client timestamp — the server assigns time everywhere, including mocks (decision #10 applies with equal force). Internally it executes a normal transfer: debit the system account, credit the customer account. It reuses the transfer service wholesale — funding introduces no new mechanics; the double-entry invariant, idempotency, and locking are inherited for free.
 
@@ -174,7 +178,7 @@ Notifications (SMS/email) happen outside the database transaction. A flaky side-
 | column | notes |
 |---|---|
 | id | PK |
-| account_number | **UNIQUE** |
+| account_number | **UNIQUE** — two formats: 10-digit random numeric for CUSTOMER accounts, currency-prefixed alphanumeric (e.g. NGN-TREASURY-01) for SYSTEM accounts (Section 6). The UNIQUE constraint backs the regenerate-on-collision loop for customer numbers. |
 | account_name | |
 | account_type | |
 | account_class | CHECK: 'CUSTOMER' or 'SYSTEM' |
@@ -258,6 +262,9 @@ ledger_entries(account_id, created_at) — balance derivation (enquiry) is the h
 | 16 | Account deletion | Hard delete vs status change | Status change only (ACTIVE/FROZEN/BLOCKED) | Entries are immutable; deleting an account with history would make the ledger lie |
 | 17 | Status check ordering | Before vs after balance derivation | Before | Deriving a balance that a status rejection will discard is wasted work |
 | 18 | Destination account locking | FOR UPDATE vs unlocked read inside the transaction | Unlocked read | The destination check is a single-row column read — no phantom possible; the lock would tax every transfer and make two-lock deadlocks routine while only reshuffling a serialization artifact, not preventing a correctness anomaly |
+| 19 | account_type role | Behavioral vs descriptive | Descriptive only in v1 | No business rule reads it; behavior keys off account_class and status. Documented so the column is not mistaken for missing logic |
+| 20 | System-account creation | Same endpoint with class field vs separate admin endpoint | Separate admin endpoint | Account class is a privilege boundary (overdraft floor = spending power); boundaries live in routes and auth, not payload fields |
+| 21 | Customer account numbers | Sequential vs random; encoded prefix vs plain | Plain 10-digit random, first digit non-zero | Sequential enables customer-base enumeration; encoding currency/type in digits duplicates truth already in columns (decision #3's principle); non-zero first digit survives integer conversion in downstream systems at full length |
 
 ## 10. Open questions / next steps
 

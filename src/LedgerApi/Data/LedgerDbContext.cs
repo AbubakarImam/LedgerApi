@@ -17,6 +17,11 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
         {
             entity.HasKey(a => a.Id);
             entity.HasIndex(a => a.AccountNumber).IsUnique();
+            entity.Property(a => a.AccountType).HasConversion<string>();
+            entity.Property(a => a.AccountClass).HasConversion<string>();
+            entity.Property(a => a.Status).HasConversion<string>();
+            entity.ToTable(t => t.HasCheckConstraint("ck_accounts_account_class", "\"account_class\" IN ('Customer', 'System')"));
+            entity.ToTable(t => t.HasCheckConstraint("ck_accounts_status", "\"status\" IN ('Active', 'Frozen', 'Blocked')"));
         });
 
         modelBuilder.Entity<Transaction>(entity =>

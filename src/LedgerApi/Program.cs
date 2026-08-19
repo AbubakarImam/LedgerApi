@@ -21,6 +21,8 @@ builder.Services.AddDbContext<LedgerDbContext>(options => options
 builder.Services.AddScoped<ITransferService, TransferService>();
 builder.Services.AddScoped<IReversalService, ReversalService>();
 builder.Services.AddScoped<IAccountService, AccountService>();
+builder.Services.AddScoped<IAdminAccountService, AdminAccountService>();
+builder.Services.AddScoped<IDepositService, DepositService>();
 builder.Services.AddScoped<IMandateService, MandateService>();
 builder.Services.AddScoped<IAuditLogger, AuditLogger>();
 
