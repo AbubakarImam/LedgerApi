@@ -1,19 +1,28 @@
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Services;
+using LedgerApi.Validation;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LedgerApi.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AccountsController(IAccountService accountService) : ControllerBase
+public class AccountsController(
+    IAccountService accountService,
+    CreateAccountRequestValidator createAccountRequestValidator) : ControllerBase
 {
     [HttpPost]
     public async Task<ActionResult<AccountResponse>> CreateAccount(
         [FromBody] CreateAccountRequest request,
         CancellationToken cancellationToken)
     {
+        var errors = createAccountRequestValidator.Validate(request);
+        if (errors.Count > 0)
+        {
+            return BadRequest(errors);
+        }
+
         var account = await accountService.CreateAccountAsync(request, cancellationToken);
         return Ok(account);
     }

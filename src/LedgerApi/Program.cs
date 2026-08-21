@@ -3,6 +3,7 @@ using LedgerApi.Authorization;
 using LedgerApi.Data;
 using LedgerApi.Middleware;
 using LedgerApi.Services;
+using LedgerApi.Validation;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -25,6 +26,8 @@ builder.Services.AddScoped<IAdminAccountService, AdminAccountService>();
 builder.Services.AddScoped<IDepositService, DepositService>();
 builder.Services.AddScoped<IMandateService, MandateService>();
 builder.Services.AddScoped<IAuditLogger, AuditLogger>();
+
+builder.Services.AddScoped<CreateAccountRequestValidator>();
 
 var app = builder.Build();
 
