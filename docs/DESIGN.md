@@ -265,12 +265,12 @@ ledger_entries(account_id, created_at) — balance derivation (enquiry) is the h
 | 19 | account_type role | Behavioral vs descriptive | Descriptive only in v1 | No business rule reads it; behavior keys off account_class and status. Documented so the column is not mistaken for missing logic |
 | 20 | System-account creation | Same endpoint with class field vs separate admin endpoint | Separate admin endpoint | Account class is a privilege boundary (overdraft floor = spending power); boundaries live in routes and auth, not payload fields |
 | 21 | Customer account numbers | Sequential vs random; encoded prefix vs plain | Plain 10-digit random, first digit non-zero | Sequential enables customer-base enumeration; encoding currency/type in digits duplicates truth already in columns (decision #3's principle); non-zero first digit survives integer conversion in downstream systems at full length |
+| 22 | System-account creation service boundary | Shared method on AccountService vs dedicated AdminAccountService | Dedicated AdminAccountService | The privilege boundary lives in the dependency graph, not an if-statement; admin auth lands on the whole service in v2 |
 
 ## 10. Open questions / next steps
 
 **Q: List everything you couldn't answer confidently.**
 
-- Detailed EF Core mapping of the schema (types, enum handling for entry_type and status).
 - Hotspot mitigation beyond v1 (durable queue such as Kafka in front of hot accounts).
 - Outbox pattern for reliable notifications.
 - There are certainly things I am not yet aware of; this document is expected to evolve during implementation, with changes recorded in the decisions log.
