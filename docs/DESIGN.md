@@ -198,6 +198,7 @@ Notifications (SMS/email) happen outside the database transaction. A flaky side-
 | narration | |
 | created_at | server-assigned |
 | completed_at | |
+| failure_reason | nullable — set together with status = failed and completed_at when a business-logic check rejects the transfer (Section 4/5); null on success |
 
 **ledger_entries**
 | column | notes |
@@ -266,6 +267,7 @@ ledger_entries(account_id, created_at) — balance derivation (enquiry) is the h
 | 20 | System-account creation | Same endpoint with class field vs separate admin endpoint | Separate admin endpoint | Account class is a privilege boundary (overdraft floor = spending power); boundaries live in routes and auth, not payload fields |
 | 21 | Customer account numbers | Sequential vs random; encoded prefix vs plain | Plain 10-digit random, first digit non-zero | Sequential enables customer-base enumeration; encoding currency/type in digits duplicates truth already in columns (decision #3's principle); non-zero first digit survives integer conversion in downstream systems at full length |
 | 22 | System-account creation service boundary | Shared method on AccountService vs dedicated AdminAccountService | Dedicated AdminAccountService | The privilege boundary lives in the dependency graph, not an if-statement; admin auth lands on the whole service in v2 |
+| 23 | Account-not-found during transfer | Throw a distinct exception (e.g. mapped to 404) vs commit as a business-logic failure | Commit as a business-logic failure (same treatment as insufficient funds) | Consistent with decision #6 - the caller gets a normal response, and a retry with the same idempotency key returns the same stored failure, rather than the request looking like it was never attempted |
 
 ## 10. Open questions / next steps
 

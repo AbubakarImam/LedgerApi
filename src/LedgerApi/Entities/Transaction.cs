@@ -12,4 +12,5 @@ public class Transaction
     public DateTimeOffset? CompletedAt { get; set; }
 
     public ICollection<LedgerEntry> Entries { get; set; } = new List<LedgerEntry>();
+    public string? FailureReason { get; set; }
 }
