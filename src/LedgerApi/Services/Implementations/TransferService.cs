@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using System.Data.Common;
+using System.Security.Principal;
 
 
 namespace LedgerApi.Services;
@@ -44,40 +45,31 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
 
         await using var dbTransaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-        //const int attempts = 10;
-        //var inserted = false;
-        //for (int i = 0; i < attempts; i++) {
-            const string allowedChar = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-            const int length = 15;
+        const string allowedChar = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        const int length = 15;
 
-            var reference = new char[length];
-            var now = DateTimeOffset.UtcNow;
+        var reference = new char[length];
+        var now = DateTimeOffset.UtcNow;
 
 
-            for (int j = 0; j < length; j++)
-            {
-                int indexChar = Random.Shared.Next(allowedChar.Length);
-                reference[j] = allowedChar[indexChar]; 
-            }
-            var myReference = $"TXN-" + new string (reference);
-            var transaction = new Transaction
-            {
-                Reference = myReference,
-                IdempotencyKey = request.IdempotencyKey,
-                Status = TransactionStatus.Pending,
-                Narration = request.Narration,
-                CreatedAt = now
-
-
-            };
-            await dbContext.Transactions.AddAsync(transaction);
+        for (int j = 0; j < length; j++)
+        {
+            int indexChar = Random.Shared.Next(allowedChar.Length);
+            reference[j] = allowedChar[indexChar];
+        }
+        var myReference = $"TXN-" + new string(reference);
+        var transaction = new Transaction
+        {
+            Reference = myReference,
+            IdempotencyKey = request.IdempotencyKey,
+            Status = TransactionStatus.Pending,
+            Narration = request.Narration,
+            CreatedAt = now
+        };
+        await dbContext.Transactions.AddAsync(transaction);
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
-            //inserted = true;
-            //break;
-            //Locking Account logic
-
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" } pgEx)
         {
@@ -117,12 +109,12 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
         try
         {
             //Locking Source Account 
-                sourceAccount = await dbContext.Accounts.FromSqlInterpolated($"""
+            sourceAccount = await dbContext.Accounts.FromSqlInterpolated($"""
                 SELECT * FROM "accounts" WHERE "account_number" = {request.DebitAccountNumber}
                 FOR UPDATE
                 """).SingleOrDefaultAsync(cancellationToken);
-            
-        } 
+
+        }
         catch
         {
             await dbTransaction.RollbackAsync(cancellationToken);
@@ -131,5 +123,93 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
         if (sourceAccount is null)
             return await FailTransferAsync(transaction, "Source account not found", dbTransaction, cancellationToken);
 
+        Account? destinationAccount;
+        try
+        {
+            //Getting Destination Account
+            destinationAccount = await dbContext.Accounts
+                .SingleOrDefaultAsync(x => x.AccountNumber == request.CreditAccountNumber, cancellationToken);
+
+        }
+        catch
+        {
+            await dbTransaction.RollbackAsync(cancellationToken); throw;
+        }
+        if (destinationAccount is null)
+            return await FailTransferAsync(transaction, "Destination account not found", dbTransaction, cancellationToken);
+
+        //Check Source account status
+        if (sourceAccount.Status != AccountStatus.Active)
+            return await FailTransferAsync(transaction, "Source account not active", dbTransaction, cancellationToken);
+
+        //Check Destination account status
+        if (destinationAccount.Status == AccountStatus.Blocked)
+            return await FailTransferAsync(transaction, "Destination account is blocked", dbTransaction, cancellationToken);
+
+        // Check Currency Code
+        if (sourceAccount.CurrencyCode != destinationAccount.CurrencyCode)
+            return await FailTransferAsync(transaction, "Conflicting currency type", dbTransaction, cancellationToken);
+
+        //Derive account balance
+        var balance = await dbContext.LedgerEntries.Where(x => x.AccountId == sourceAccount.Id)
+           .SumAsync(x => x.EntryType == EntryType.Credit ? x.Amount : -x.Amount, cancellationToken);
+       
+        //Check Sufficient funds
+        var sourceAccountBalance = balance - request.Amount;
+
+        if (sourceAccount.AccountClass == AccountClass.Customer)
+        {
+            if (sourceAccountBalance < 0m)
+                return await FailTransferAsync(transaction, "Insufficient Account Balance", dbTransaction, cancellationToken);
+        }
+        else if (sourceAccount.AccountClass == AccountClass.System)
+        {
+            if (sourceAccountBalance < -1_000_000_000_000m)
+                return await FailTransferAsync(transaction, "Insufficient Account Balance", dbTransaction, cancellationToken);
+        }
+
+        //Append Debit Entry
+        var debitEntry = new LedgerEntry
+        {
+            TransactionId = transaction.Id,
+            AccountId = sourceAccount.Id,
+            EntryType = EntryType.Debit,
+            Amount = request.Amount,
+            Currency = sourceAccount.CurrencyCode,
+            CreatedAt = now,
+            Transaction = transaction,
+            Account = sourceAccount
+        };
+        await dbContext.LedgerEntries.AddAsync(debitEntry);
+
+
+        //Append Credit Entry
+        var creditEntry = new LedgerEntry
+        {
+            TransactionId = transaction.Id,
+            AccountId = destinationAccount.Id,
+            EntryType = EntryType.Credit,
+            Amount = request.Amount,
+            Currency = destinationAccount.CurrencyCode,
+            CreatedAt = now,
+            Transaction = transaction,
+            Account = destinationAccount
+        };
+        await dbContext.LedgerEntries.AddAsync(creditEntry);
+
+        transaction.Status = TransactionStatus.Success;
+        transaction.CompletedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await dbTransaction.CommitAsync(cancellationToken);
+        } catch
+        {
+            await dbTransaction.RollbackAsync(cancellationToken); throw;
+        }
+
+        return new TransferResponse(transaction.Reference, transaction.Status.ToString());
     }
 }
