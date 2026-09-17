@@ -28,6 +28,7 @@ builder.Services.AddScoped<IMandateService, MandateService>();
 builder.Services.AddScoped<IAuditLogger, AuditLogger>();
 
 builder.Services.AddScoped<CreateAccountRequestValidator>();
+builder.Services.AddScoped<TransferRequestValidator>();
 
 var app = builder.Build();
 
