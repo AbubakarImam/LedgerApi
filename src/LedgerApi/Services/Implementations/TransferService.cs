@@ -105,6 +105,9 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
             throw;
         }
 
+        if (request.Amount <= 0m)
+            return await FailTransferAsync(transaction, "Amount must be positive", dbTransaction, cancellationToken);
+
         Account? sourceAccount;
         try
         {
@@ -167,7 +170,10 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
             if (sourceAccountBalance < -1_000_000_000_000m)
                 return await FailTransferAsync(transaction, "Insufficient Account Balance", dbTransaction, cancellationToken);
         }
-
+        else
+        {
+            return await FailTransferAsync(transaction, $"Unrecognized account class: {sourceAccount.AccountClass}", dbTransaction, cancellationToken);
+        }
         //Append Debit Entry
         var debitEntry = new LedgerEntry
         {
