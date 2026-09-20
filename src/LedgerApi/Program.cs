@@ -1,5 +1,6 @@
 using LedgerApi.Auditing;
 using LedgerApi.Authorization;
+using LedgerApi.Configuration;
 using LedgerApi.Data;
 using LedgerApi.Middleware;
 using LedgerApi.Services;
@@ -19,6 +20,8 @@ builder.Services.AddDbContext<LedgerDbContext>(options => options
     .UseNpgsql(builder.Configuration.GetConnectionString("LedgerDb"))
     .UseSnakeCaseNamingConvention());
 
+builder.Services.Configure<FundingOptions>(builder.Configuration.GetSection("Funding"));
+
 builder.Services.AddScoped<ITransferService, TransferService>();
 builder.Services.AddScoped<IReversalService, ReversalService>();
 builder.Services.AddScoped<IAccountService, AccountService>();
@@ -29,6 +32,7 @@ builder.Services.AddScoped<IAuditLogger, AuditLogger>();
 
 builder.Services.AddScoped<CreateAccountRequestValidator>();
 builder.Services.AddScoped<TransferRequestValidator>();
+builder.Services.AddScoped<DepositRequestValidator>();
 
 var app = builder.Build();
 

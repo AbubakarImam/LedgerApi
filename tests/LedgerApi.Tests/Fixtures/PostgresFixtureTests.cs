@@ -21,8 +21,12 @@ public class PostgresFixturetests : IAsyncLifetime
     public async Task Container_HasSchemaApplied()
     {
         await using var context = _fixture.CreateContext();
-        var accountCount = await context.Accounts.CountAsync();
-        Assert.Equal(0, accountCount);
+        var fundingNumbers = await context.Accounts
+            .Where(a => a.AccountClass == LedgerApi.Entities.AccountClass.System)
+            .Select(a => a.AccountNumber)
+            .ToListAsync();
+
+        Assert.Equivalent(new[] { "NGN100000001", "USD100000001", "GBP100000001", "EUR100000001" }, fundingNumbers);
     }
 
 }
