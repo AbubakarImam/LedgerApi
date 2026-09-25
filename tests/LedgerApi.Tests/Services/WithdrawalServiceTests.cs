@@ -150,6 +150,20 @@ public class WithdrawalServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WithdrawAsync_Throws_WhenTargetIsASystemAccount()
+    {
+        await SeedAccountsAsync();
+        await using var ctx = _fixture.CreateContext();
+
+        await Assert.ThrowsAsync<AccountNotFoundException>(() =>
+            CreateService(ctx).WithdrawAsync(
+                new WithdrawalRequest(FundingNumber, 200m, null, Guid.NewGuid().ToString())));
+
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Equal(0, await verifyCtx.Transactions.CountAsync());
+    }
+
+    [Fact]
     public async Task WithdrawAsync_Throws_WhenNoFundingAccountConfiguredForCurrency()
     {
         await SeedAccountsAsync(customerCurrency: "USD");

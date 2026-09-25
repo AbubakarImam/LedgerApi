@@ -2,6 +2,7 @@ using LedgerApi.Configuration;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Data;
+using LedgerApi.Entities;
 using LedgerApi.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -17,8 +18,10 @@ public class DepositService(
     {
         var customerAccount = await dbContext.Accounts
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.AccountNumber == request.CustomerAccountNumber, cancellationToken);
+            .FirstOrDefaultAsync(x => x.AccountNumber == request.CustomerAccountNumber
+                && x.AccountClass == AccountClass.Customer, cancellationToken);
 
+        // A system account is treated as not found: mock funding only ever targets customer accounts (decision #31).
         if (customerAccount is null)
             throw new AccountNotFoundException($"Customer account '{request.CustomerAccountNumber}' was not found.");
 

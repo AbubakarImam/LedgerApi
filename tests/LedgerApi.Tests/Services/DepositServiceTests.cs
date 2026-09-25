@@ -105,6 +105,20 @@ public class DepositServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DepositAsync_Throws_WhenTargetIsASystemAccount()
+    {
+        await SeedAccountsAsync();
+        await using var ctx = _fixture.CreateContext();
+
+        await Assert.ThrowsAsync<AccountNotFoundException>(() =>
+            CreateService(ctx).DepositAsync(
+                new DepositRequest(FundingNumber, 500m, null, Guid.NewGuid().ToString())));
+
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Equal(0, await verifyCtx.Transactions.CountAsync());
+    }
+
+    [Fact]
     public async Task DepositAsync_Throws_WhenNoFundingAccountConfiguredForCurrency()
     {
         await SeedAccountsAsync(customerCurrency: "USD");
