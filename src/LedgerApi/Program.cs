@@ -27,6 +27,7 @@ builder.Services.AddScoped<IReversalService, ReversalService>();
 builder.Services.AddScoped<IAccountService, AccountService>();
 builder.Services.AddScoped<IAdminAccountService, AdminAccountService>();
 builder.Services.AddScoped<IDepositService, DepositService>();
+builder.Services.AddScoped<IWithdrawalService, WithdrawalService>();
 builder.Services.AddScoped<IMandateService, MandateService>();
 builder.Services.AddScoped<IAuditLogger, AuditLogger>();
 
@@ -34,6 +35,7 @@ builder.Services.AddScoped<CreateAccountRequestValidator>();
 builder.Services.AddScoped<TransferRequestValidator>();
 builder.Services.AddScoped<DepositRequestValidator>();
 builder.Services.AddScoped<ReversalRequestValidator>();
+builder.Services.AddScoped<WithdrawalRequestValidator>();
 
 var app = builder.Build();
 
