@@ -38,7 +38,7 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
         transaction.FailureReason = reason;
         await dbContext.SaveChangesAsync(cancellationToken);
         await dbTransaction.CommitAsync(cancellationToken);
-        return new TransferResponse(transaction.Reference, transaction.Status.ToString());
+        return new TransferResponse(transaction.Reference, transaction.Status.ToString(), transaction.FailureReason);
     }
     public async Task<TransferResponse> TransferAsync(TransferRequest request, CancellationToken cancellationToken = default)
     {
@@ -70,7 +70,8 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
                     await dbTransaction.RollbackAsync(cancellationToken);
                     return new TransferResponse(
                         dbInsertedTransaction.Reference,
-                        dbInsertedTransaction.Status.ToString()
+                        dbInsertedTransaction.Status.ToString(),
+                        dbInsertedTransaction.FailureReason
                         );
 
 

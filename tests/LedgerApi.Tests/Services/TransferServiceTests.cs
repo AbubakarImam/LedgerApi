@@ -57,6 +57,7 @@ public class TransferServiceTests : IAsyncLifetime
         var response = await service.TransferAsync(request);
 
         Assert.Equal("Success", response.Status);
+        Assert.Null(response.FailureReason);
 
         await using var verifyCtx = _fixture.CreateContext();
         var entries = await verifyCtx.LedgerEntries.ToListAsync();
@@ -121,6 +122,7 @@ public class TransferServiceTests : IAsyncLifetime
 
         var response = await service.TransferAsync(request);
         Assert.Equal("Failed", response.Status);
+        Assert.Equal("Insufficient Account Balance", response.FailureReason);
 
         await using var verifyCtx = _fixture.CreateContext();
         var transaction = await verifyCtx.Transactions.SingleAsync(t => t.Reference == response.Reference);
@@ -540,5 +542,56 @@ public class TransferServiceTests : IAsyncLifetime
         Assert.Empty(entries);
 
 
+    }
+
+    [Fact]
+    public async Task TransferAsync_ReturnsStoredFailure_OnIdempotentRetryOfFailedTransfer()
+    {
+        await using var ctx = _fixture.CreateContext();
+
+        var sourceAccount = new Account
+        {
+            AccountNumber = "1000000011",
+            AccountName = "Empty Customer Account",
+            AccountType = AccountType.Savings,
+            AccountClass = AccountClass.Customer,
+            CurrencyCode = "NGN",
+            Status = AccountStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        var destinationAccount = new Account
+        {
+            AccountNumber = "1000000012",
+            AccountName = "Test Customer Account",
+            AccountType = AccountType.Savings,
+            AccountClass = AccountClass.Customer,
+            CurrencyCode = "NGN",
+            Status = AccountStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        ctx.Accounts.AddRange(sourceAccount, destinationAccount);
+        await ctx.SaveChangesAsync();
+
+        var request = new TransferRequest(
+            DebitAccountNumber: sourceAccount.AccountNumber,
+            CreditAccountNumber: destinationAccount.AccountNumber,
+            Amount: 100m,
+            Narration: "Failed replay test",
+            IdempotencyKey: Guid.NewGuid().ToString());
+
+        await using var ctx1 = _fixture.CreateContext();
+        var firstResponse = await new TransferService(ctx1).TransferAsync(request);
+
+        await using var ctx2 = _fixture.CreateContext();
+        var retryResponse = await new TransferService(ctx2).TransferAsync(request);
+
+        Assert.Equal("Failed", retryResponse.Status);
+        Assert.Equal(firstResponse.Reference, retryResponse.Reference);
+        Assert.Equal("Insufficient Account Balance", retryResponse.FailureReason);
+
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Equal(1, await verifyCtx.Transactions.CountAsync());
     }
 }

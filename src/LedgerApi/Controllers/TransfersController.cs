@@ -1,5 +1,6 @@
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
+using LedgerApi.Entities;
 using LedgerApi.Services;
 using LedgerApi.Validation;
 using Microsoft.AspNetCore.Mvc;
@@ -23,6 +24,10 @@ public class TransfersController(ITransferService transferService,
         }
 
         var response = await transferService.TransferAsync(request, cancellationToken);
-        return Ok(response);
+
+        // A business-rule failure is committed and returned like a success, but with 422 (decision #29).
+        return response.Status == nameof(TransactionStatus.Failed)
+            ? UnprocessableEntity(response)
+            : Ok(response);
     }
 }

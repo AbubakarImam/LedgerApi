@@ -2,4 +2,5 @@ namespace LedgerApi.Contracts.Responses;
 
 public record TransferResponse(
     string Reference,
-    string Status);
+    string Status,
+    string? FailureReason = null);
