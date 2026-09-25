@@ -1,6 +1,76 @@
 @LedgerApi_HostAddress = http://localhost:5293
 
-GET {{LedgerApi_HostAddress}}/weatherforecast/
+# Replace with an account number returned by "Create customer account".
+@customerAccount = 1000000001
+@otherAccount = 1000000002
+
+### Create customer account
+POST {{LedgerApi_HostAddress}}/api/accounts
+Content-Type: application/json
+
+{
+  "accountName": "Ada Lovelace",
+  "accountType": "Savings",
+  "currencyCode": "NGN"
+}
+
+### Create system account (admin)
+POST {{LedgerApi_HostAddress}}/api/admin/system-accounts
+Content-Type: application/json
+
+{
+  "accountName": "NGN Fees",
+  "accountType": "Wallet",
+  "currencyCode": "NGN"
+}
+
+### Account enquiry
+GET {{LedgerApi_HostAddress}}/api/accounts/{{customerAccount}}
 Accept: application/json
 
-###
+### Balance enquiry
+GET {{LedgerApi_HostAddress}}/api/accounts/{{customerAccount}}/balance
+Accept: application/json
+
+### Deposit (mock funding)
+POST {{LedgerApi_HostAddress}}/api/deposits
+Content-Type: application/json
+
+{
+  "customerAccountNumber": "{{customerAccount}}",
+  "amount": 5000.00,
+  "narration": "Initial funding",
+  "idempotencyKey": "{{$guid}}"
+}
+
+### Transfer
+POST {{LedgerApi_HostAddress}}/api/transfers
+Content-Type: application/json
+
+{
+  "debitAccountNumber": "{{customerAccount}}",
+  "creditAccountNumber": "{{otherAccount}}",
+  "amount": 1500.00,
+  "narration": "Rent",
+  "idempotencyKey": "{{$guid}}"
+}
+
+### Withdrawal (mock)
+POST {{LedgerApi_HostAddress}}/api/withdrawals
+Content-Type: application/json
+
+{
+  "customerAccountNumber": "{{customerAccount}}",
+  "amount": 500.00,
+  "narration": "ATM",
+  "idempotencyKey": "{{$guid}}"
+}
+
+### Reversal (use a reference returned by a transfer, deposit or withdrawal)
+POST {{LedgerApi_HostAddress}}/api/reversals
+Content-Type: application/json
+
+{
+  "originalTransactionReference": "TXN-REPLACEME",
+  "reason": "Customer dispute"
+}
