@@ -45,22 +45,11 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
 
         await using var dbTransaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-        const string allowedChar = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-        const int length = 15;
-
-        var reference = new char[length];
         var now = DateTimeOffset.UtcNow;
 
-
-        for (int j = 0; j < length; j++)
-        {
-            int indexChar = Random.Shared.Next(allowedChar.Length);
-            reference[j] = allowedChar[indexChar];
-        }
-        var myReference = $"TXN-" + new string(reference);
         var transaction = new Transaction
         {
-            Reference = myReference,
+            Reference = TransactionReference.Generate(),
             IdempotencyKey = request.IdempotencyKey,
             Status = TransactionStatus.Pending,
             Narration = request.Narration,
