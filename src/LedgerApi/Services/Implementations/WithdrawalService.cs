@@ -9,12 +9,12 @@ using Microsoft.Extensions.Options;
 
 namespace LedgerApi.Services;
 
-public class DepositService(
+public class WithdrawalService(
     ITransferService transferService,
     LedgerDbContext dbContext,
-    IOptions<FundingOptions> options) : IDepositService
+    IOptions<FundingOptions> options) : IWithdrawalService
 {
-    public async Task<TransferResponse> DepositAsync(DepositRequest request, CancellationToken cancellationToken = default)
+    public async Task<TransferResponse> WithdrawAsync(WithdrawalRequest request, CancellationToken cancellationToken = default)
     {
         var customerAccount = await dbContext.Accounts
             .AsNoTracking()
@@ -29,8 +29,8 @@ public class DepositService(
             throw new InvalidOperationException($"No funding account is configured for currency '{customerAccount.CurrencyCode}'.");
 
         var transferRequest = new TransferRequest(
-            DebitAccountNumber: fundingAccountNumber,
-            CreditAccountNumber: customerAccount.AccountNumber,
+            DebitAccountNumber: customerAccount.AccountNumber,
+            CreditAccountNumber: fundingAccountNumber,
             Amount: request.Amount,
             Narration: request.Narration,
             IdempotencyKey: request.IdempotencyKey);
