@@ -134,7 +134,7 @@ Transfer, reversal, balance enquiry, account enquiry, account creation, mock fun
 
 **Q: For the transfer endpoint specifically: write out the request body and the success response body.**
 
-Request body: debit account, credit account, amount, narration, idempotency key. Time is not accepted from the client — the server assigns created_at; a ledger's ordering of events is its truth. Success response: status 200 with the transaction reference.
+Request body: debit account, credit account, amount, narration, idempotency key. Time is not accepted from the client — the server assigns created_at; a ledger's ordering of events is its truth. Success response: status 200 with the transaction reference and status. A committed business-rule failure returns the same body shape with status 422 and a `failureReason` (decision #29).
 
 **Q: For the account creation and mock funding endpoints specifically: what do they do?**
 
@@ -146,7 +146,7 @@ Both endpoints generate the account number and id server-side; status starts ACT
 
 **Q: What does the API return when a transfer fails for insufficient funds? What HTTP status, and why that one?**
 
-422 — the request did not fail because of network or system error; it failed a business rule, and the status should say so.
+422 — the request did not fail because of network or system error; it failed a business rule, and the status should say so. The body is the stored transfer result (reference, status `Failed`, failure reason), and a retry with the same idempotency key returns the same 422 and body.
 
 **Q: Which endpoints need authorization rules (mandates), and what does a mandate check look like in the request flow?**
 
@@ -273,6 +273,7 @@ ledger_entries(account_id, created_at) — balance derivation (enquiry) is the h
 | 26 | Error responses | Every exception as a generic 500 vs map known business exceptions to specific statuses | Map known exceptions in ExceptionHandlingMiddleware: AccountNotFound 404; DuplicateIdempotencyKey and AlreadyReversed 409; InsufficientFunds, CurrencyMismatch and InvalidAccountStatus 422; anything else 500 | Clients can act on a 404/409/422 but not on a blanket 500. Only mapped (expected) errors expose their message in the response; unexpected errors return a generic body and are logged at Error, while mapped ones are logged at Warning. A client that disconnects mid-request is logged, not reported as a server error |
 | 27 | Reversal failures | Commit a failed reversal row (as transfers do, decision #6) vs roll back everything and return a mapped error | Roll back everything; the exception maps to 404 (TransactionNotFound), 409 (AlreadyReversed) or 422 (TransactionNotReversible, InsufficientFunds, InvalidAccountStatus) | Reversals carry no client idempotency key, so a stored failure would have nothing to be replayed against; the unique index on reversals.original_transaction_id is the retry guard instead: a retry after success gets 409, a retry after failure starts fresh (e.g. once the funds are back). The envelope still gets a server-generated `REVERSAL-<guid>` key because the column is required and unique |
 | 28 | Reversal rules | Reversal bypasses balance/status checks vs obeys transfer rules | Obeys transfer rules: only Success transactions, never a reversal of a reversal, the account debited must be Active and able to afford it (floor for SYSTEM), the account credited must not be Blocked. Only the account being debited (the original credit side) is locked with FOR UPDATE; the account being credited is read unlocked, as in a transfer (decision #18). A reversal cannot call TransferService, because EF Core cannot nest its transaction inside the reversal's and the reversals row must commit with the mirror entries | A reversal is a normal money movement and must not create money or overdraw a customer; reversing a reversal would silently redo the original. The duplicate check (reversals row insert) runs before locking so a duplicate is rejected without balance work |
+| 29 | Status code for a committed business failure | 200 with status `Failed` in the body vs 422 with the same body | 422 with the stored TransferResponse (reference, status, failure reason), for transfers and deposits; retries return the same 422 | The status code should say the business rule failed (Section 6) without breaking decision #6: the failure is still committed and replayed by idempotency key, so the controller maps the stored `Failed` status to 422 instead of the service throwing. Returning the same body shape on 200 and 422 means clients always get the reference and can look the transaction up |
 
 ## 10. Open questions / next steps
 
