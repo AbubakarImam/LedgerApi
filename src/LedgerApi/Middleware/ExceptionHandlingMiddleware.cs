@@ -40,6 +40,8 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
     private static (int Status, string Title) Map(Exception ex) => ex switch
     {
         AccountNotFoundException => (StatusCodes.Status404NotFound, "Account not found."),
+        TransactionNotFoundException => (StatusCodes.Status404NotFound, "Transaction not found."),
+        TransactionNotReversibleException => (StatusCodes.Status422UnprocessableEntity, "Transaction cannot be reversed."),
         DuplicateIdempotencyKeyException => (StatusCodes.Status409Conflict, "Duplicate idempotency key."),
         AlreadyReversedException => (StatusCodes.Status409Conflict, "Transaction has already been reversed."),
         InsufficientFundsException => (StatusCodes.Status422UnprocessableEntity, "Insufficient funds."),

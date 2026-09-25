@@ -33,6 +33,7 @@ builder.Services.AddScoped<IAuditLogger, AuditLogger>();
 builder.Services.AddScoped<CreateAccountRequestValidator>();
 builder.Services.AddScoped<TransferRequestValidator>();
 builder.Services.AddScoped<DepositRequestValidator>();
+builder.Services.AddScoped<ReversalRequestValidator>();
 
 var app = builder.Build();
 
