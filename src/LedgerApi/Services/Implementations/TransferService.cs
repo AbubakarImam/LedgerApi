@@ -1,3 +1,4 @@
+using LedgerApi.Auditing;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Data;
@@ -11,7 +12,7 @@ using System.Security.Principal;
 
 namespace LedgerApi.Services;
 
-public class TransferService(LedgerDbContext dbContext) : ITransferService
+public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger) : ITransferService
 {
     //accept idempotency key from the request(client-supplied)
     // Attempt to insert transaction envelope with the key, inside transaction table
@@ -26,20 +27,36 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
     // write debit entry into account A
     // write credit entry into account b
     // mark transaction envelope status = success, set completed_at
+    // stage an audit row so it commits with the envelope and entries
     //commit all changes 
     // on business logic failure at any check it thows one of the scaffolded exceptions; mark envelope statuss = failed, with reason. commit only those
     // Map to transferResponse, return
 
     private async Task<TransferResponse> FailTransferAsync(
-    Transaction transaction, string reason, IDbContextTransaction dbTransaction, CancellationToken cancellationToken)
+    Transaction transaction, TransferRequest request, string reason, IDbContextTransaction dbTransaction, CancellationToken cancellationToken)
     {
         transaction.Status = TransactionStatus.Failed;
         transaction.CompletedAt = DateTimeOffset.UtcNow;
         transaction.FailureReason = reason;
+        RecordAudit(transaction, request, currency: null);
         await dbContext.SaveChangesAsync(cancellationToken);
         await dbTransaction.CommitAsync(cancellationToken);
         return new TransferResponse(transaction.Reference, transaction.Status.ToString(), transaction.FailureReason);
     }
+
+    private void RecordAudit(Transaction transaction, TransferRequest request, string? currency) =>
+        auditLogger.Record(new AuditLog
+        {
+            Action = AuditActions.Transfer,
+            EntityType = nameof(Transaction),
+            EntityId = transaction.Reference,
+            DebitAccountNumber = request.DebitAccountNumber,
+            CreditAccountNumber = request.CreditAccountNumber,
+            Amount = request.Amount,
+            Currency = currency,
+            Status = transaction.Status.ToString(),
+        });
+
     public async Task<TransferResponse> TransferAsync(TransferRequest request, CancellationToken cancellationToken = default)
     {
 
@@ -96,7 +113,7 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
         }
 
         if (request.Amount <= 0m)
-            return await FailTransferAsync(transaction, "Amount must be positive", dbTransaction, cancellationToken);
+            return await FailTransferAsync(transaction, request, "Amount must be positive", dbTransaction, cancellationToken);
 
         Account? sourceAccount;
         try
@@ -114,7 +131,7 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
             throw;
         }
         if (sourceAccount is null)
-            return await FailTransferAsync(transaction, "Source account not found", dbTransaction, cancellationToken);
+            return await FailTransferAsync(transaction, request, "Source account not found", dbTransaction, cancellationToken);
 
         Account? destinationAccount;
         try
@@ -129,19 +146,19 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
             await dbTransaction.RollbackAsync(cancellationToken); throw;
         }
         if (destinationAccount is null)
-            return await FailTransferAsync(transaction, "Destination account not found", dbTransaction, cancellationToken);
+            return await FailTransferAsync(transaction, request, "Destination account not found", dbTransaction, cancellationToken);
 
         //Check Source account status
         if (sourceAccount.Status != AccountStatus.Active)
-            return await FailTransferAsync(transaction, "Source account not active", dbTransaction, cancellationToken);
+            return await FailTransferAsync(transaction, request, "Source account not active", dbTransaction, cancellationToken);
 
         //Check Destination account status
         if (destinationAccount.Status == AccountStatus.Blocked)
-            return await FailTransferAsync(transaction, "Destination account is blocked", dbTransaction, cancellationToken);
+            return await FailTransferAsync(transaction, request, "Destination account is blocked", dbTransaction, cancellationToken);
 
         // Check Currency Code
         if (sourceAccount.CurrencyCode != destinationAccount.CurrencyCode)
-            return await FailTransferAsync(transaction, "Conflicting currency type", dbTransaction, cancellationToken);
+            return await FailTransferAsync(transaction, request, "Conflicting currency type", dbTransaction, cancellationToken);
 
         //Derive account balance
         var balance = await dbContext.LedgerEntries.Where(x => x.AccountId == sourceAccount.Id)
@@ -153,16 +170,16 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
         if (sourceAccount.AccountClass == AccountClass.Customer)
         {
             if (sourceAccountBalance < 0m)
-                return await FailTransferAsync(transaction, "Insufficient Account Balance", dbTransaction, cancellationToken);
+                return await FailTransferAsync(transaction, request, "Insufficient Account Balance", dbTransaction, cancellationToken);
         }
         else if (sourceAccount.AccountClass == AccountClass.System)
         {
             if (sourceAccountBalance < -1_000_000_000_000m)
-                return await FailTransferAsync(transaction, "Insufficient Account Balance", dbTransaction, cancellationToken);
+                return await FailTransferAsync(transaction, request, "Insufficient Account Balance", dbTransaction, cancellationToken);
         }
         else
         {
-            return await FailTransferAsync(transaction, $"Unrecognized account class: {sourceAccount.AccountClass}", dbTransaction, cancellationToken);
+            return await FailTransferAsync(transaction, request, $"Unrecognized account class: {sourceAccount.AccountClass}", dbTransaction, cancellationToken);
         }
         //Append Debit Entry
         var debitEntry = new LedgerEntry
@@ -195,6 +212,9 @@ public class TransferService(LedgerDbContext dbContext) : ITransferService
 
         transaction.Status = TransactionStatus.Success;
         transaction.CompletedAt = DateTimeOffset.UtcNow;
+
+        //Record Audit, committed with the entries
+        RecordAudit(transaction, request, sourceAccount.CurrencyCode);
 
         try
         {

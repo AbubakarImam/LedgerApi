@@ -32,7 +32,9 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
                 Status = status,
                 Title = title,
                 // Only expected business errors expose their message; unexpected ones must not leak internals.
-                Detail = isExpected ? ex.Message : null
+                Detail = isExpected ? ex.Message : null,
+                // Lets a client quote the id when reporting a problem; it matches the logs and audit rows.
+                Extensions = { ["correlationId"] = context.TraceIdentifier }
             });
         }
     }

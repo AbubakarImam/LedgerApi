@@ -70,6 +70,9 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
         modelBuilder.Entity<AuditLog>(entity =>
         {
             entity.HasKey(a => a.Id);
+            entity.Property(a => a.Amount).HasPrecision(18, 2);
+            entity.HasIndex(a => a.EntityId);
+            entity.HasIndex(a => a.CorrelationId);
         });
     }
 }

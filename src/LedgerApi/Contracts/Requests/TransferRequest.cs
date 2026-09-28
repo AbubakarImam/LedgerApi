@@ -5,4 +5,4 @@ public record TransferRequest(
     string CreditAccountNumber,
     decimal Amount,
     string? Narration,
-    string IdempotencyKey);
+    string IdempotencyKey) : IIdempotentRequest;

@@ -4,4 +4,4 @@ public record WithdrawalRequest(
     string CustomerAccountNumber,
     decimal Amount,
     string? Narration,
-    string IdempotencyKey);
+    string IdempotencyKey) : IIdempotentRequest;

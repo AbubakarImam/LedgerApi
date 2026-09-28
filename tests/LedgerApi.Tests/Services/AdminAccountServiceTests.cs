@@ -22,7 +22,7 @@ public class AdminAccountServiceTests : IAsyncLifetime
     {
         await using var ctx = _fixture.CreateContext();
 
-        var service = new AdminAccountService(ctx);
+        var service = new AdminAccountService(ctx, TestAudit.For(ctx));
         var request = new CreateAccountRequest(
             AccountName: "Test Account",
              AccountType: "Wallet",

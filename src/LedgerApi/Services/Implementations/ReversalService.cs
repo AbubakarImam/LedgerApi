@@ -1,3 +1,4 @@
+using LedgerApi.Auditing;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Data;
@@ -8,7 +9,7 @@ using Npgsql;
 
 namespace LedgerApi.Services;
 
-public class ReversalService(LedgerDbContext dbContext) : IReversalService
+public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger) : IReversalService
 {
     // Decision #14: a system account may go negative, but never below this floor.
     private const decimal SystemAccountOverdraftFloor = -1_000_000_000_000m;
@@ -29,6 +30,7 @@ public class ReversalService(LedgerDbContext dbContext) : IReversalService
     // write debit entry into the account the original credited
     // write credit entry into the account the original debited
     // mark reversal envelope status = success, set completed_at
+    // stage an audit row so it commits with the entries and the reversals row
     // commit all changes
     // on any failure roll back everything, no failed row is kept (decision #27); middleware maps the exception to a status code
     // Map to TransactionResponse, return
@@ -168,6 +170,19 @@ public class ReversalService(LedgerDbContext dbContext) : IReversalService
         //Mark Reversal envelope success (commit happens in ReverseAsync)
         reversalTransaction.Status = TransactionStatus.Success;
         reversalTransaction.CompletedAt = DateTimeOffset.UtcNow;
+
+        //Record Audit, committed with the entries and the reversals row
+        auditLogger.Record(new AuditLog
+        {
+            Action = AuditActions.Reversal,
+            EntityType = nameof(Transaction),
+            EntityId = reversalTransaction.Reference,
+            DebitAccountNumber = debitAccount.AccountNumber,
+            CreditAccountNumber = creditAccount.AccountNumber,
+            Amount = amount,
+            Currency = debitAccount.CurrencyCode,
+            Status = reversalTransaction.Status.ToString(),
+        });
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new TransactionResponse(

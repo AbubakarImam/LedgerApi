@@ -1,3 +1,4 @@
+using LedgerApi.Auditing;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Entities;
 using LedgerApi.Exceptions;
@@ -44,7 +45,7 @@ public class ReversalServiceTests : IAsyncLifetime
     private async Task<string> TransferAsync(string debit, string credit, decimal amount)
     {
         await using var ctx = _fixture.CreateContext();
-        var response = await new TransferService(ctx).TransferAsync(
+        var response = await new TransferService(ctx, TestAudit.For(ctx)).TransferAsync(
             new TransferRequest(debit, credit, amount, "Seed transfer", Guid.NewGuid().ToString()));
         return response.Reference;
     }
@@ -59,7 +60,7 @@ public class ReversalServiceTests : IAsyncLifetime
     private async Task<Contracts.Responses.TransactionResponse> ReverseAsync(string reference, string? reason = null)
     {
         await using var ctx = _fixture.CreateContext();
-        return await new ReversalService(ctx).ReverseAsync(new ReversalRequest(reference, reason));
+        return await new ReversalService(ctx, TestAudit.For(ctx)).ReverseAsync(new ReversalRequest(reference, reason));
     }
 
     [Fact]
@@ -158,6 +159,8 @@ public class ReversalServiceTests : IAsyncLifetime
         await using var verifyCtx = _fixture.CreateContext();
         Assert.Equal(0, await verifyCtx.Reversals.CountAsync());
         Assert.Equal(2, await verifyCtx.Transactions.CountAsync());
+        // Only the two seed transfers are audited; the failed reversal's staged row rolled back with it.
+        Assert.Equal(2, await verifyCtx.AuditLogs.CountAsync());
     }
 
     [Fact]
@@ -250,5 +253,22 @@ public class ReversalServiceTests : IAsyncLifetime
         Assert.Single(results, r => r == "ok");
         Assert.Equal(4, results.Count(r => r == "already"));
         Assert.Equal(0m, await BalanceAsync(customer.Id));
+    }
+
+    [Fact]
+    public async Task ReverseAsync_RecordsAuditRow_WithTheReversal()
+    {
+        var (system, customer, _) = await SeedAccountsAsync();
+        var originalReference = await TransferAsync(system.AccountNumber, customer.AccountNumber, 100m);
+
+        var response = await ReverseAsync(originalReference);
+
+        await using var verifyCtx = _fixture.CreateContext();
+        var audit = await verifyCtx.AuditLogs.SingleAsync(a => a.Action == AuditActions.Reversal);
+        Assert.Equal(response.Reference, audit.EntityId);
+        Assert.Equal(customer.AccountNumber, audit.DebitAccountNumber);
+        Assert.Equal(system.AccountNumber, audit.CreditAccountNumber);
+        Assert.Equal(100m, audit.Amount);
+        Assert.Equal("Success", audit.Status);
     }
 }
