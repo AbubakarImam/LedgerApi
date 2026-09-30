@@ -104,4 +104,6 @@ docs/DESIGN.md      Design document and decisions log
 
 ## Not implemented yet
 
-- **Authentication and mandates.** No endpoint is authorized yet, including the admin system-account route. See DESIGN.md Section 6.
+- **Authentication.** No endpoint is authenticated yet, including the admin system-account route. See DESIGN.md Section 6.
+
+Customer-level authorization (mandates) is out of scope by design: the calling service checks that its customer may act on an account, and the ledger authorizes only the service (DESIGN.md decision #34).
