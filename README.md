@@ -74,6 +74,15 @@ Service tests run against a real PostgreSQL container started by [Testcontainers
 | `422` | A business rule failed: insufficient funds, account status, currency mismatch, or a transaction that can't be reversed. For transfers, deposits and withdrawals the failure is committed and the body carries `reference`, `status: "Failed"` and `failureReason`. A retry with the same idempotency key returns the same 422. |
 | `500` | Unexpected error. Retry with the **same** idempotency key to learn whether money moved. |
 
+## Logging and tracing
+
+Every request gets a **correlation id**. Send your own in an `X-Correlation-ID` header (1-64 letters, digits, `-`, `_` or `.`), or let the API generate one. It comes back in the `X-Correlation-ID` response header, and error responses include it as `correlationId`.
+
+- **Request logs** (Serilog, console): one line per request with method, path, status code, duration, correlation id, user, client IP and, for money-moving requests, the idempotency key. Request bodies are never logged. Configure it in the `Serilog` section of `appsettings.json`.
+- **Audit trail** (`audit_logs` table): one row per account creation, transfer, deposit, withdrawal and reversal, committed in the same database transaction as the change. Each row carries the correlation id.
+
+To investigate a request, search the logs for its correlation id, then query `audit_logs` by `correlation_id`.
+
 ## Project layout
 
 ```
@@ -84,7 +93,8 @@ src/LedgerApi/
   Data/             LedgerDbContext and model configuration
   Migrations/       EF Core migrations
   Validation/       Request validators
-  Middleware/       Maps known exceptions to HTTP status codes
+  Middleware/       Correlation id, exception-to-status mapping, idempotency-key log filter
+  Auditing/         Audit trail (IAuditLogger stages rows on the request's DbContext)
 tests/LedgerApi.Tests/
   Services/         Integration tests against PostgreSQL (Testcontainers)
   Controllers/      Status-code mapping tests with stub services
@@ -95,5 +105,3 @@ docs/DESIGN.md      Design document and decisions log
 ## Not implemented yet
 
 - **Authentication and mandates.** No endpoint is authorized yet, including the admin system-account route. See DESIGN.md Section 6.
-- **Audit logging.** `AuditLogger` is a stub.
-- **Request logging** with request id, actor and idempotency key (DESIGN.md Section 7).

@@ -227,12 +227,19 @@ Notifications (SMS/email) happen outside the database transaction. A flaky side-
 | column | notes |
 |---|---|
 | id | PK |
-| actor_id | |
-| action | |
-| entity_type | |
-| entity_id | |
+| actor_id | the authenticated caller; null until auth exists |
+| action | CustomerAccountCreated, SystemAccountCreated, Transfer or Reversal |
+| entity_type | Account or Transaction |
+| entity_id | account number or transaction reference. Indexed |
+| debit_account_number | transfers and reversals |
+| credit_account_number | transfers and reversals |
+| amount | decimal(18,2); transfers and reversals |
+| currency | |
+| status | outcome, e.g. Success or Failed |
+| correlation_id | the request's correlation id (decision #33). Indexed, to find every log line for the request |
+| endpoint | e.g. `POST /api/deposits`; tells deposits and withdrawals apart from direct transfers |
 | ip_address | |
-| user_agent | |
+| user_agent | truncated to 512 characters |
 | created_at | server-assigned |
 
 **Q: Which columns are immutable after insert? Why does immutability matter in a ledger?**
@@ -278,6 +285,8 @@ ledger_entries(account_id, created_at) — balance derivation (enquiry) is the h
 | 29 | Status code for a committed business failure | 200 with status `Failed` in the body vs 422 with the same body | 422 with the stored TransferResponse (reference, status, failure reason), for transfers, deposits and withdrawals; retries return the same 422 | The status code should say the business rule failed (Section 6) without breaking decision #6: the failure is still committed and replayed by idempotency key, so the controller maps the stored `Failed` status to 422 instead of the service throwing. Returning the same body shape on 200 and 422 means clients always get the reference and can look the transaction up |
 | 30 | Withdrawals | Out of scope for v1 vs mock withdrawal endpoint; shared vs separate settlement account | Mock withdrawal endpoint in v1, reusing the transfer service (customer to funding account), sharing the funding accounts used by deposits | Mirror of decision #15: it introduces no new mechanics, and the customer-side balance rule already prevents overdraft. Committed business failures return 422, the same as transfers and deposits (decision #29). A shared counterparty is enough for a mock; a real withdrawal to an external bank would need its own settlement account, noted as the future path |
 | 31 | Mock funding target account class | Accept any account number vs customer accounts only | Customer accounts only: deposits and withdrawals look the account up with account_class = CUSTOMER, and a system account number gets the same 404 as an unknown one | A withdrawal from a system account would let a caller drain treasury down to the overdraft floor through an unprivileged endpoint; account class is a privilege boundary (decision #20). Reporting it as not found, rather than a distinct error, avoids confirming that a system account number exists |
+| 32 | Audit trail storage | Write audit events through Serilog vs a database table written in the same transaction | `audit_logs` table; `IAuditLogger.Record` only stages the row on the request's DbContext, so the caller's own SaveChanges commits or rolls it back with the change it describes. Serilog is used for operational request logs | A log sink writes outside the database transaction: a crash after commit loses the audit record, and a failed commit after logging leaves a record of something that never happened. Audited: account creation, transfers (Success and committed Failed, including deposits and withdrawals, told apart by `endpoint`) and reversals. Not audited: reads, idempotent replays (nothing changed) and rolled-back attempts (nothing committed); those are visible in the request log |
+| 33 | Correlation id | ASP.NET's generated TraceIdentifier only vs accept a client id | Accept an `X-Correlation-ID` header when it is 1-64 characters of letters, digits, `-`, `_` or `.`; otherwise generate one. It becomes HttpContext.TraceIdentifier and is echoed in the response header, pushed onto every log line, stored on audit rows and returned as `correlationId` in error bodies | One id ties a client's report, its request log line, any error stack trace and the audit rows together. A client-supplied id lets callers correlate across services; validation stops log injection and oversized values, since the header is untrusted |
 
 ## 10. Open questions / next steps
 

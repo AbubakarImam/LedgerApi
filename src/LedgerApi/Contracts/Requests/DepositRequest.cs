@@ -4,4 +4,4 @@ public record DepositRequest(
     string CustomerAccountNumber,
     decimal Amount,
     string? Narration,
-    string IdempotencyKey);
+    string IdempotencyKey) : IIdempotentRequest;

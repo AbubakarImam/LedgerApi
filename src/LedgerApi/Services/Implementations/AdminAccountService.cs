@@ -1,3 +1,4 @@
+using LedgerApi.Auditing;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Data;
@@ -7,7 +8,7 @@ using Npgsql;
 
 namespace LedgerApi.Services;
 
-public class AdminAccountService(LedgerDbContext dbContext) : IAdminAccountService
+public class AdminAccountService(LedgerDbContext dbContext, IAuditLogger auditLogger) : IAdminAccountService
 {
     public async Task<AccountResponse> CreateSystemAccountAsync(CreateAccountRequest request, CancellationToken cancellationToken = default)
     {
@@ -32,6 +33,15 @@ public class AdminAccountService(LedgerDbContext dbContext) : IAdminAccountServi
 
             await dbContext.Accounts.AddAsync(account);
 
+            var audit = auditLogger.Record(new AuditLog
+            {
+                Action = AuditActions.SystemAccountCreated,
+                EntityType = nameof(Account),
+                EntityId = account.AccountNumber,
+                Currency = account.CurrencyCode,
+                Status = account.Status.ToString(),
+            });
+
             try
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
@@ -49,7 +59,9 @@ public class AdminAccountService(LedgerDbContext dbContext) : IAdminAccountServi
             }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" })
             {
+                // Detach the audit row too, or the retry would save it alongside the next attempt's row.
                 dbContext.Entry(account).State = EntityState.Detached;
+                dbContext.Entry(audit).State = EntityState.Detached;
             }
 
         }

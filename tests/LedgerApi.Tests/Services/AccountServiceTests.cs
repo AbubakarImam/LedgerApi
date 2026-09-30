@@ -1,3 +1,4 @@
+using LedgerApi.Auditing;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Entities;
 using LedgerApi.Services;
@@ -21,7 +22,7 @@ public class AccountServiceTests : IAsyncLifetime
     {
         await using var ctx = _fixture.CreateContext();
 
-        var service = new AccountService(ctx);
+        var service = new AccountService(ctx, TestAudit.For(ctx));
         var request = new CreateAccountRequest(
             AccountName: "Test Account",
             AccountType: "Wallet",
@@ -56,7 +57,7 @@ public class AccountServiceTests : IAsyncLifetime
         ctx.Accounts.Add(seedAccount);
         await ctx.SaveChangesAsync();
 
-        var service = new AccountService(ctx);
+        var service = new AccountService(ctx, TestAudit.For(ctx));
         var request = "NGN-TEST-SYS-01";
 
         var response = await service.GetAccountAsync(request);
@@ -71,7 +72,7 @@ public class AccountServiceTests : IAsyncLifetime
         await using var ctx = _fixture.CreateContext();
 
 
-        var service = new AccountService(ctx);
+        var service = new AccountService(ctx, TestAudit.For(ctx));
 
         var response = await service.GetAccountAsync("0000000000");
 
@@ -128,7 +129,7 @@ public class AccountServiceTests : IAsyncLifetime
 
         await ctx.SaveChangesAsync();
 
-        var service = new AccountService(ctx);
+        var service = new AccountService(ctx, TestAudit.For(ctx));
         var response = await service.GetBalanceAsync("NGN-TEST-SYS-01");
         Assert.Equal(200m, response.Balance);
 
@@ -140,11 +141,27 @@ public class AccountServiceTests : IAsyncLifetime
         await using var ctx = _fixture.CreateContext();
 
 
-        var service = new AccountService(ctx);
+        var service = new AccountService(ctx, TestAudit.For(ctx));
 
         var response = await service.GetBalanceAsync("0000000000");
 
         Assert.Null(response);
 
+    }
+
+    [Fact]
+    public async Task CreateAccountAsync_RecordsAuditRow()
+    {
+        await using var ctx = _fixture.CreateContext();
+
+        var account = await new AccountService(ctx, TestAudit.For(ctx))
+            .CreateAccountAsync(new CreateAccountRequest("Audit Customer", "Savings", "NGN"));
+
+        await using var verifyCtx = _fixture.CreateContext();
+        var audit = await verifyCtx.AuditLogs.SingleAsync();
+        Assert.Equal(AuditActions.CustomerAccountCreated, audit.Action);
+        Assert.Equal(nameof(Account), audit.EntityType);
+        Assert.Equal(account.AccountNumber, audit.EntityId);
+        Assert.Equal("NGN", audit.Currency);
     }
 }
