@@ -1,8 +1,10 @@
+using LedgerApi.Authorization;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Entities;
 using LedgerApi.Services;
 using LedgerApi.Validation;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LedgerApi.Controllers;
@@ -12,6 +14,7 @@ namespace LedgerApi.Controllers;
 public class TransfersController(ITransferService transferService,
     TransferRequestValidator transferRequestValidator) : ControllerBase
 {
+    [Authorize(Policy = LedgerScopes.Transfer)]
     [HttpPost]
     public async Task<ActionResult<TransferResponse>> Transfer(
         [FromBody] TransferRequest request,

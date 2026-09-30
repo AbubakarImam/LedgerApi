@@ -40,7 +40,7 @@ This also seeds the funding system accounts `NGN100000001`, `USD100000001`, `GBP
 dotnet run --project src/LedgerApi --launch-profile http
 ```
 
-Swagger UI is at http://localhost:5293/swagger. [src/LedgerApi/LedgerApi.http](src/LedgerApi/LedgerApi.http) has a ready-made request for every endpoint (VS Code REST Client, Rider or Visual Studio).
+Swagger UI is at http://localhost:5293/swagger (click **Authorize** and paste a development key from [Authentication](#authentication)). [src/LedgerApi/LedgerApi.http](src/LedgerApi/LedgerApi.http) has a ready-made request for every endpoint (VS Code REST Client, Rider or Visual Studio).
 
 ## Running the tests
 
@@ -69,10 +69,57 @@ Service tests run against a real PostgreSQL container started by [Testcontainers
 |---|---|
 | `200` | Success |
 | `400` | Request failed validation |
+| `401` | Missing or unknown API key |
+| `403` | The API key lacks the endpoint's scope |
 | `404` | Account or transaction not found |
 | `409` | Transaction already reversed |
 | `422` | A business rule failed: insufficient funds, account status, currency mismatch, or a transaction that can't be reversed. For transfers, deposits and withdrawals the failure is committed and the body carries `reference`, `status: "Failed"` and `failureReason`. A retry with the same idempotency key returns the same 422. |
 | `500` | Unexpected error. Retry with the **same** idempotency key to learn whether money moved. |
+
+## Authentication
+
+The ledger authenticates **calling services**, not customers (DESIGN.md decision #34). Every request needs an `X-Api-Key` header, and each key is granted **scopes**:
+
+| Scope | Endpoints |
+|---|---|
+| `ledger.read` | `GET /api/accounts/{n}`, `GET /api/accounts/{n}/balance` |
+| `ledger.accounts` | `POST /api/accounts` |
+| `ledger.transfer` | `POST /api/transfers` |
+| `ledger.funding` | `POST /api/deposits`, `POST /api/withdrawals` |
+| `ledger.reverse` | `POST /api/reversals` |
+| `ledger.admin` | `POST /api/admin/system-accounts` |
+
+A missing or unknown key gets **401**; a valid key without the endpoint's scope gets **403**.
+
+### Development keys
+
+`appsettings.Development.json` configures two local-only clients. Never use these outside your machine.
+
+| Client | Key | Scopes |
+|---|---|---|
+| `dev-payment-api` | `lk_dev_payment_wj6C4L8LnpS03vUDi_UV6CZJClsr4SBc` | read, accounts, transfer, funding |
+| `dev-ops` | `lk_dev_ops_1pGPvWKNhflS5oblWCbjHC6a0f6buOri` | read, reverse, admin |
+
+In Swagger UI, click **Authorize** and paste a key.
+
+### Issuing a key
+
+Only the SHA-256 hash of a key is configured, never the key itself. Generate a key and its hash:
+
+```bash
+KEY="lk_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"; echo "$KEY"; printf %s "$KEY" | openssl dgst -sha256 -binary | base64
+```
+
+Give the key to the calling service and add the hash to configuration, e.g. through environment variables:
+
+```bash
+export ApiKeys__Clients__0__ClientId=payment-api
+export ApiKeys__Clients__0__KeyHash=<hash>
+export ApiKeys__Clients__0__Scopes__0=ledger.read
+export ApiKeys__Clients__0__Scopes__1=ledger.transfer
+```
+
+`appsettings.json` ships with no clients, so an environment without keys rejects every request. The app refuses to start if a configured hash or scope is invalid. To rotate a key, add a second entry for the same `ClientId` with the new hash, move the caller over, then remove the old entry.
 
 ## Logging and tracing
 
@@ -102,8 +149,6 @@ tests/LedgerApi.Tests/
 docs/DESIGN.md      Design document and decisions log
 ```
 
-## Not implemented yet
-
-- **Authentication.** No endpoint is authenticated yet, including the admin system-account route. See DESIGN.md Section 6.
+## Out of scope
 
 Customer-level authorization (mandates) is out of scope by design: the calling service checks that its customer may act on an account, and the ledger authorizes only the service (DESIGN.md decision #34).

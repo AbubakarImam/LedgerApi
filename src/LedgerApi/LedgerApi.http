@@ -4,8 +4,13 @@
 @customerAccount = 1000000001
 @otherAccount = 1000000002
 
+# Development keys (appsettings.Development.json). Never use these outside your machine.
+@paymentKey = lk_dev_payment_wj6C4L8LnpS03vUDi_UV6CZJClsr4SBc
+@opsKey = lk_dev_ops_1pGPvWKNhflS5oblWCbjHC6a0f6buOri
+
 ### Create customer account
 POST {{LedgerApi_HostAddress}}/api/accounts
+X-Api-Key: {{paymentKey}}
 Content-Type: application/json
 
 {
@@ -16,6 +21,7 @@ Content-Type: application/json
 
 ### Create system account (admin)
 POST {{LedgerApi_HostAddress}}/api/admin/system-accounts
+X-Api-Key: {{opsKey}}
 Content-Type: application/json
 
 {
@@ -26,14 +32,17 @@ Content-Type: application/json
 
 ### Account enquiry
 GET {{LedgerApi_HostAddress}}/api/accounts/{{customerAccount}}
+X-Api-Key: {{paymentKey}}
 Accept: application/json
 
 ### Balance enquiry
 GET {{LedgerApi_HostAddress}}/api/accounts/{{customerAccount}}/balance
+X-Api-Key: {{paymentKey}}
 Accept: application/json
 
 ### Deposit (mock funding)
 POST {{LedgerApi_HostAddress}}/api/deposits
+X-Api-Key: {{paymentKey}}
 Content-Type: application/json
 
 {
@@ -45,6 +54,7 @@ Content-Type: application/json
 
 ### Transfer
 POST {{LedgerApi_HostAddress}}/api/transfers
+X-Api-Key: {{paymentKey}}
 Content-Type: application/json
 
 {
@@ -57,6 +67,7 @@ Content-Type: application/json
 
 ### Withdrawal (mock)
 POST {{LedgerApi_HostAddress}}/api/withdrawals
+X-Api-Key: {{paymentKey}}
 Content-Type: application/json
 
 {
@@ -68,6 +79,7 @@ Content-Type: application/json
 
 ### Reversal (use a reference returned by a transfer, deposit or withdrawal)
 POST {{LedgerApi_HostAddress}}/api/reversals
+X-Api-Key: {{opsKey}}
 Content-Type: application/json
 
 {

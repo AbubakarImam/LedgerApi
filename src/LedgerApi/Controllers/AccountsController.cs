@@ -1,7 +1,9 @@
+using LedgerApi.Authorization;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Services;
 using LedgerApi.Validation;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LedgerApi.Controllers;
@@ -12,6 +14,7 @@ public class AccountsController(
     IAccountService accountService,
     CreateAccountRequestValidator createAccountRequestValidator) : ControllerBase
 {
+    [Authorize(Policy = LedgerScopes.Accounts)]
     [HttpPost]
     public async Task<ActionResult<AccountResponse>> CreateAccount(
         [FromBody] CreateAccountRequest request,
@@ -27,6 +30,7 @@ public class AccountsController(
         return Ok(account);
     }
 
+    [Authorize(Policy = LedgerScopes.Read)]
     [HttpGet("{accountNumber}")]
     public async Task<ActionResult<AccountResponse>> GetAccount(
         string accountNumber,
@@ -36,6 +40,7 @@ public class AccountsController(
         return account is null ? NotFound() : Ok(account);
     }
 
+    [Authorize(Policy = LedgerScopes.Read)]
     [HttpGet("{accountNumber}/balance")]
     public async Task<ActionResult<BalanceResponse>> GetBalance(
         string accountNumber,

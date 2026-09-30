@@ -1,7 +1,9 @@
+using LedgerApi.Authorization;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Services;
 using LedgerApi.Validation;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LedgerApi.Controllers;
@@ -12,6 +14,7 @@ public class ReversalsController(
     IReversalService reversalService,
     ReversalRequestValidator reversalRequestValidator) : ControllerBase
 {
+    [Authorize(Policy = LedgerScopes.Reverse)]
     [HttpPost]
     public async Task<ActionResult<TransactionResponse>> Reverse(
         [FromBody] ReversalRequest request,
