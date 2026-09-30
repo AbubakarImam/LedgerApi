@@ -119,6 +119,8 @@ export ApiKeys__Clients__0__Scopes__0=ledger.read
 export ApiKeys__Clients__0__Scopes__1=ledger.transfer
 ```
 
+Serve the API over **HTTPS only** in production (at your proxy/ingress or Kestrel), with no plain-HTTP port exposed: the app does not redirect HTTP to HTTPS, because by then the key has already been sent in plain text (DESIGN.md decision #36).
+
 `appsettings.json` ships with no clients, so an environment without keys rejects every request. The app refuses to start if a configured hash or scope is invalid. To rotate a key, add a second entry for the same `ClientId` with the new hash, move the caller over, then remove the old entry.
 
 ## Logging and tracing
