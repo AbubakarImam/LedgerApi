@@ -1,5 +1,4 @@
 using LedgerApi.Auditing;
-using LedgerApi.Authorization;
 using LedgerApi.Configuration;
 using LedgerApi.Data;
 using LedgerApi.Middleware;
@@ -43,7 +42,6 @@ try
     builder.Services.AddScoped<IAdminAccountService, AdminAccountService>();
     builder.Services.AddScoped<IDepositService, DepositService>();
     builder.Services.AddScoped<IWithdrawalService, WithdrawalService>();
-    builder.Services.AddScoped<IMandateService, MandateService>();
     builder.Services.AddScoped<IAuditLogger, AuditLogger>();
 
     builder.Services.AddScoped<CreateAccountRequestValidator>();

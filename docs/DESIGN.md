@@ -13,7 +13,7 @@ This is a ledger that records accounting information. It keeps a record of entri
 
 **Q: What is explicitly OUT of scope for v1?**
 
-Reconciliation, notifications, containerization, multiple account identifier types, and cross-currency transfers (a transfer between accounts of different currencies is rejected).
+Reconciliation, notifications, containerization, multiple account identifier types, and cross-currency transfers (a transfer between accounts of different currencies is rejected), and customer-level authorization (mandates): the ledger does not decide which customer may operate which account (decision #34).
 
 v1 supports currencies with two decimal places only; account creation rejects others.
 
@@ -27,7 +27,7 @@ v1 includes account creation, a mock funding (deposit) flow, and a mock withdraw
 - **Transaction (envelope):** identified by id, reference (unique), and idempotency key (unique). States: pending / success / failed. It encompasses all the details for a transaction — reference, status, narration, who initiated it — but does not hold account numbers or amounts.
 - **Entry:** an individual account movement. Each entry belongs to a transaction and records one account, an amount, and a direction (debit or credit). Entries are immutable — they have no state changes after insert.
 - **Reversal:** identified by id; unique per original transaction. References the original transaction and is written together with new forward entries.
-- **Mandate:** the ledger does not hold identity information (email, BVN, NIN). It only saves references that the mandate system can use to query. Identity data has different retention, access, and regulatory rules and lives outside the ledger.
+- **Customer identity:** the ledger holds no customer identity information (email, BVN, NIN) and no record of which customer may operate which account. Identity data has different retention, access, and regulatory rules and lives outside the ledger; checking that a customer may act on an account is the calling service's job (decision #34).
 
 `account_type` (savings/current/wallet, etc.) is descriptive only in v1 — no business rule reads it. All behavior keys off `account_class` and `status`. This is stated explicitly so the column is not mistaken for forgotten logic.
 
@@ -150,11 +150,9 @@ Both endpoints generate the account number and id server-side; status starts ACT
 
 422 — the request did not fail because of network or system error; it failed a business rule, and the status should say so. The body is the stored transfer result (reference, status `Failed`, failure reason), and a retry with the same idempotency key returns the same 422 and body.
 
-**Q: Which endpoints need authorization rules (mandates), and what does a mandate check look like in the request flow?**
+**Q: Which endpoints need authorization rules, and what does an authorization check look like in the request flow?**
 
-All endpoints, reads included, require authorization — the mandate flow exists for this. Authorization and locking are different things and both exist: the lock happens in the database and controls access to the account row during a transaction; authorization happens in the application code before the action and checks permission to perform it. What read endpoints skip is the lock, not auth.
-
-Mandate flow: get account references, derive balance, use identifiers to get account info.
+All endpoints, reads included, require the calling service to be authenticated and authorized for the operation. The ledger authorizes **services, not customers**: it checks which operations a calling service (e.g. the payment API or an ops console) may perform, and trusts that service to have already checked that its customer may act on the account (decision #34). The authentication mechanism is still to be designed. Authorization and locking are different things and both exist: the lock happens in the database and controls access to the account row during a transaction; authorization happens before the action and checks permission to perform it. What read endpoints skip is the lock, not auth.
 
 Enquiry balances are informational — computed from committed entries without acquiring the account lock, and may be stale the moment they are returned. The only authoritative balance read is the locked one inside the transfer path. Locking enquiries would serialize the highest-volume read path through the most contended chokepoint for zero correctness gain.
 
@@ -287,6 +285,7 @@ ledger_entries(account_id, created_at) — balance derivation (enquiry) is the h
 | 31 | Mock funding target account class | Accept any account number vs customer accounts only | Customer accounts only: deposits and withdrawals look the account up with account_class = CUSTOMER, and a system account number gets the same 404 as an unknown one | A withdrawal from a system account would let a caller drain treasury down to the overdraft floor through an unprivileged endpoint; account class is a privilege boundary (decision #20). Reporting it as not found, rather than a distinct error, avoids confirming that a system account number exists |
 | 32 | Audit trail storage | Write audit events through Serilog vs a database table written in the same transaction | `audit_logs` table; `IAuditLogger.Record` only stages the row on the request's DbContext, so the caller's own SaveChanges commits or rolls it back with the change it describes. Serilog is used for operational request logs | A log sink writes outside the database transaction: a crash after commit loses the audit record, and a failed commit after logging leaves a record of something that never happened. Audited: account creation, transfers (Success and committed Failed, including deposits and withdrawals, told apart by `endpoint`) and reversals. Not audited: reads, idempotent replays (nothing changed) and rolled-back attempts (nothing committed); those are visible in the request log |
 | 33 | Correlation id | ASP.NET's generated TraceIdentifier only vs accept a client id | Accept an `X-Correlation-ID` header when it is 1-64 characters of letters, digits, `-`, `_` or `.`; otherwise generate one. It becomes HttpContext.TraceIdentifier and is echoed in the response header, pushed onto every log line, stored on audit rows and returned as `correlationId` in error bodies | One id ties a client's report, its request log line, any error stack trace and the audit rows together. A client-supplied id lets callers correlate across services; validation stops log injection and oversized values, since the header is untrusted |
+| 34 | Customer-level authorization (mandates) | Ledger stores mandates (which customer may operate which account) and checks them on every request vs the calling service checks the customer, the ledger authorizes only the service | The ledger authorizes services only; mandates and the stub `IMandateService` are removed | Checking a customer's mandate needs customer identity data, which the ledger deliberately does not hold (decision #12): it has different retention, access and regulatory rules. The payment API already knows its customer, so it is the right place to decide whether that customer may act on an account. The consequence is a trust boundary: any service allowed to transfer can move money between any accounts, so which services hold that permission is the ledger's main control |
 
 ## 10. Open questions / next steps
 
