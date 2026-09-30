@@ -1,7 +1,9 @@
+using LedgerApi.Authorization;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Services;
 using LedgerApi.Validation;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LedgerApi.Controllers.Admin;
@@ -12,7 +14,7 @@ public class SystemAccountsController(
     IAdminAccountService adminAccountService,
     CreateAccountRequestValidator createAccountRequestValidator) : ControllerBase
 {
-    // TODO: authorization requirement not yet implemented (docs/DESIGN.md decision #20).
+    [Authorize(Policy = LedgerScopes.Admin)]
     [HttpPost]
     public async Task<ActionResult<AccountResponse>> CreateSystemAccount(
         [FromBody] CreateAccountRequest request,

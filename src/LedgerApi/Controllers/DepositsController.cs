@@ -1,8 +1,10 @@
+using LedgerApi.Authorization;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Entities;
 using LedgerApi.Services;
 using LedgerApi.Validation;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LedgerApi.Controllers;
@@ -13,6 +15,7 @@ public class DepositsController(
     IDepositService depositService,
     DepositRequestValidator depositRequestValidator) : ControllerBase
 {
+    [Authorize(Policy = LedgerScopes.Funding)]
     [HttpPost]
     public async Task<ActionResult<TransferResponse>> Deposit(
         [FromBody] DepositRequest request,
