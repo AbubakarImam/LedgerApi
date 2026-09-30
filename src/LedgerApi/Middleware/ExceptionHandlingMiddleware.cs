@@ -26,16 +26,19 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
                 logger.LogError(ex, "Unhandled exception processing {Method} {Path}", context.Request.Method, context.Request.Path);
 
             context.Response.StatusCode = status;
-            context.Response.ContentType = "application/problem+json";
-            await context.Response.WriteAsJsonAsync(new ProblemDetails
-            {
-                Status = status,
-                Title = title,
-                // Only expected business errors expose their message; unexpected ones must not leak internals.
-                Detail = isExpected ? ex.Message : null,
-                // Lets a client quote the id when reporting a problem; it matches the logs and audit rows.
-                Extensions = { ["correlationId"] = context.TraceIdentifier }
-            });
+            // contentType is passed explicitly: WriteAsJsonAsync would otherwise overwrite it with application/json.
+            await context.Response.WriteAsJsonAsync(
+                new ProblemDetails
+                {
+                    Status = status,
+                    Title = title,
+                    // Only expected business errors expose their message; unexpected ones must not leak internals.
+                    Detail = isExpected ? ex.Message : null,
+                    // Lets a client quote the id when reporting a problem; it matches the logs and audit rows.
+                    Extensions = { ["correlationId"] = context.TraceIdentifier }
+                },
+                options: null,
+                contentType: "application/problem+json");
         }
     }
 
