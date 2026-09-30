@@ -114,7 +114,8 @@ try
 
     app.UseMiddleware<ExceptionHandlingMiddleware>();
 
-    app.UseHttpsRedirection();
+    // No UseHttpsRedirection: a redirect cannot protect an API key that was already sent over HTTP.
+    // TLS belongs to the deployment (proxy/ingress or Kestrel), with no plain-HTTP port exposed (decision #36).
 
     app.UseAuthentication();
     app.UseAuthorization();
