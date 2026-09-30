@@ -126,6 +126,8 @@ try
 catch (Exception ex) when (ex is not HostAbortedException)
 {
     Log.Fatal(ex, "Ledger API terminated unexpectedly");
+    // Non-zero so Docker, Kubernetes and CI see a failed start rather than a clean stop.
+    Environment.ExitCode = 1;
 }
 finally
 {
