@@ -23,7 +23,7 @@ public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger
     // on unique-constraint violation on original_transaction_id: already reversed -> 409, no locking or balance work done
     // lock the account being debited now (original credit side)
     // fetch the account being credited now (original debit side), no locking
-    // check the account being debited now (original credit side) is active
+    // check the account being debited now (original credit side) is not blocked; frozen is allowed so money can be clawed back
     // check the account being credited now (original debit side) is not blocked
     // derive the balance of the account being debited
     // check balance sufficiency (system accounts can go to overdraft floor value)
@@ -120,10 +120,11 @@ public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger
         //Reversal moves the original amount back (both original entries carry the same amount)
         var amount = original.Entries.First().Amount;
 
-        //Check Debit account status
-        if (debitAccount.Status != AccountStatus.Active)
+        //Check Debit account status: a Frozen account can be debited by a reversal, so money can be
+        //clawed back from it (decision #38); a Blocked account cannot be debited at all.
+        if (debitAccount.Status == AccountStatus.Blocked)
             throw new InvalidAccountStatusException(
-                $"Account '{debitAccount.AccountNumber}' is {debitAccount.Status} and cannot be debited.");
+                $"Account '{debitAccount.AccountNumber}' is Blocked and cannot be debited.");
 
         //Check Credit account status
         if (creditAccount.Status == AccountStatus.Blocked)

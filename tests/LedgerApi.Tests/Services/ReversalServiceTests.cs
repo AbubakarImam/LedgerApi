@@ -164,18 +164,53 @@ public class ReversalServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ReverseAsync_Throws_WhenAccountToDebitIsFrozen()
+    public async Task ReverseAsync_ClawsBackMoney_FromAFrozenAccount()
     {
         var (system, customer, _) = await SeedAccountsAsync();
         var originalReference = await TransferAsync(system.AccountNumber, customer.AccountNumber, 100m);
+        await SetStatusAsync(customer.Id, AccountStatus.Frozen);
 
-        await using (var ctx = _fixture.CreateContext())
-        {
-            await ctx.Accounts.Where(a => a.Id == customer.Id)
-                .ExecuteUpdateAsync(s => s.SetProperty(a => a.Status, AccountStatus.Frozen));
-        }
+        var response = await ReverseAsync(originalReference, "Fraud clawback");
+
+        Assert.Equal("Success", response.Status);
+        Assert.Equal(0m, await BalanceAsync(customer.Id));
+        Assert.Equal(0m, await BalanceAsync(system.Id));
+
+        // The reversal does not unfreeze the account.
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Equal(AccountStatus.Frozen, (await verifyCtx.Accounts.SingleAsync(a => a.Id == customer.Id)).Status);
+    }
+
+    [Fact]
+    public async Task ReverseAsync_StillCannotOverdraw_AFrozenAccount()
+    {
+        var (system, customer, other) = await SeedAccountsAsync();
+        var originalReference = await TransferAsync(system.AccountNumber, customer.AccountNumber, 100m);
+        await TransferAsync(customer.AccountNumber, other.AccountNumber, 80m);
+        await SetStatusAsync(customer.Id, AccountStatus.Frozen);
+
+        await Assert.ThrowsAsync<InsufficientFundsException>(() => ReverseAsync(originalReference));
+
+        Assert.Equal(20m, await BalanceAsync(customer.Id));
+    }
+
+    [Fact]
+    public async Task ReverseAsync_Throws_WhenAccountToDebitIsBlocked()
+    {
+        var (system, customer, _) = await SeedAccountsAsync();
+        var originalReference = await TransferAsync(system.AccountNumber, customer.AccountNumber, 100m);
+        await SetStatusAsync(customer.Id, AccountStatus.Blocked);
 
         await Assert.ThrowsAsync<InvalidAccountStatusException>(() => ReverseAsync(originalReference));
+
+        Assert.Equal(100m, await BalanceAsync(customer.Id));
+    }
+
+    private async Task SetStatusAsync(long accountId, AccountStatus status)
+    {
+        await using var ctx = _fixture.CreateContext();
+        await ctx.Accounts.Where(a => a.Id == accountId)
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.Status, status));
     }
 
     [Fact]
