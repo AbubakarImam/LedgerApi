@@ -14,7 +14,7 @@ The design, including every trade-off, is in [docs/DESIGN.md](docs/DESIGN.md). S
 
 ## Prerequisites
 
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (pinned by `global.json`)
 - [Docker](https://www.docker.com/) (for the local database and for the tests)
 
 ## Getting started
@@ -140,6 +140,34 @@ Every request gets a **correlation id**. Send your own in an `X-Correlation-ID` 
 - **Audit trail** (`audit_logs` table): one row per account creation, transfer, deposit, withdrawal and reversal, committed in the same database transaction as the change. Each row carries the correlation id.
 
 To investigate a request, search the logs for its correlation id, then query `audit_logs` by `correlation_id`.
+
+## Deployment
+
+The `Dockerfile` builds two images:
+
+```bash
+docker build -t ledgerapi .                                   # the API
+docker build --target migrator -t ledgerapi-migrator .        # applies pending migrations, then exits
+```
+
+**Each release:** run the migrator against the production database first, then start the new API image. Never migrate from a developer machine, and do not migrate at API startup (two instances would race).
+
+```bash
+docker run --rm -e ConnectionStrings__LedgerDb="<connection string>" ledgerapi-migrator
+docker run -p 8080:8080 \
+  -e ConnectionStrings__LedgerDb="<connection string>" \
+  -e ApiKeys__Clients__0__ClientId=payment-api \
+  -e ApiKeys__Clients__0__KeyHash=<hash> \
+  -e ApiKeys__Clients__0__Scopes__0=ledger.read \
+  ledgerapi
+```
+
+- The API listens on port **8080** as a non-root user. Terminate HTTPS at the platform or a proxy (DESIGN.md decision #36).
+- `ASPNETCORE_ENVIRONMENT` defaults to `Production`: Swagger is off, `appsettings.Development.json` is not in the image, and with no `ApiKeys` configured every request gets 401.
+- Health checks (no API key needed): **`/health/live`** answers while the process runs (use it for restarts); **`/health/ready`** also checks the database (use it for routing traffic and gating deploys). Platforms with a single health URL should use `/health/ready`.
+- Use a managed PostgreSQL with point-in-time recovery: the ledger's entries are the only source of truth for balances.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the tests and builds both images on every pull request and push to `main`.
 
 ## Project layout
 
