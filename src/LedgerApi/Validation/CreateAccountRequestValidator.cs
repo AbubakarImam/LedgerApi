@@ -14,6 +14,12 @@ public class CreateAccountRequestValidator
             errors.Add($"'{request.AccountType}' is not a recognized account type.");
         }
 
+        if (!SupportedCurrencies.IsSupported(request.CurrencyCode))
+        {
+            errors.Add($"'{request.CurrencyCode}' is not a supported currency. " +
+                $"Supported: {string.Join(", ", SupportedCurrencies.DecimalPlaces.Keys)}.");
+        }
+
         return errors;
     }
 }

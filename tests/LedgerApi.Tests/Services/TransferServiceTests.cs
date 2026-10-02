@@ -668,4 +668,60 @@ public class TransferServiceTests : IAsyncLifetime
         await using var verifyCtx = _fixture.CreateContext();
         Assert.Equal(1, await verifyCtx.AuditLogs.CountAsync());
     }
+
+    private async Task<(Account System, Account Customer)> SeedCurrencyAccountsAsync(string currency)
+    {
+        await using var ctx = _fixture.CreateContext();
+        var system = new Account
+        {
+            AccountNumber = $"{currency}-PRECISION-SYS", AccountName = "Precision System", AccountType = AccountType.Wallet,
+            AccountClass = AccountClass.System, CurrencyCode = currency, Status = AccountStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        var customer = new Account
+        {
+            AccountNumber = "1000000070", AccountName = "Precision Customer", AccountType = AccountType.Wallet,
+            AccountClass = AccountClass.Customer, CurrencyCode = currency, Status = AccountStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        ctx.Accounts.AddRange(system, customer);
+        await ctx.SaveChangesAsync();
+        return (system, customer);
+    }
+
+    [Theory]
+    [InlineData("XOF", "1500.50")] // CFA franc has no decimal places
+    [InlineData("JPY", "0.5")]
+    [InlineData("NGN", "10.005")]  // 3 decimals: would otherwise be silently rounded to 10.01 by decimal(18,2)
+    public async Task TransferAsync_Fails_WhenAmountHasMoreDecimalPlacesThanTheCurrencyAllows(string currency, string amount)
+    {
+        var (system, customer) = await SeedCurrencyAccountsAsync(currency);
+        await using var ctx = _fixture.CreateContext();
+
+        var response = await new TransferService(ctx, TestAudit.For(ctx)).TransferAsync(new TransferRequest(
+            system.AccountNumber, customer.AccountNumber, decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture),
+            "Precision test", Guid.NewGuid().ToString()));
+
+        Assert.Equal("Failed", response.Status);
+        Assert.StartsWith($"Amount has more decimal places than {currency} allows", response.FailureReason);
+
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Empty(await verifyCtx.LedgerEntries.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("XOF", "1500")]
+    [InlineData("JPY", "1500.00")] // trailing zeros are still a whole number
+    [InlineData("NGN", "10.05")]
+    public async Task TransferAsync_Succeeds_WhenAmountFitsTheCurrency(string currency, string amount)
+    {
+        var (system, customer) = await SeedCurrencyAccountsAsync(currency);
+        await using var ctx = _fixture.CreateContext();
+
+        var response = await new TransferService(ctx, TestAudit.For(ctx)).TransferAsync(new TransferRequest(
+            system.AccountNumber, customer.AccountNumber, decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture),
+            "Precision test", Guid.NewGuid().ToString()));
+
+        Assert.Equal("Success", response.Status);
+    }
 }

@@ -32,7 +32,7 @@ dotnet tool restore
 dotnet ef database update --project src/LedgerApi
 ```
 
-This also seeds the funding system accounts `NGN100000001`, `USD100000001`, `GBP100000001` and `EUR100000001` that deposits and withdrawals use.
+This also seeds a funding system account for every supported currency (`NGN100000001`, `USD100000001`, …) that deposits and withdrawals use.
 
 **3. Run the API:**
 
@@ -75,6 +75,15 @@ Service tests run against a real PostgreSQL container started by [Testcontainers
 | `409` | Transaction already reversed |
 | `422` | A business rule failed: insufficient funds, account status, currency mismatch, or a transaction that can't be reversed. For transfers, deposits and withdrawals the failure is committed and the body carries `reference`, `status: "Failed"` and `failureReason`. A retry with the same idempotency key returns the same 422. |
 | `500` | Unexpected error. Retry with the **same** idempotency key to learn whether money moved. |
+
+## Supported currencies
+
+| Decimal places | Currencies |
+|---|---|
+| 2 | USD, EUR, GBP, NGN, CNY, GHS, SAR, QAR, AED, CHF, CAD, AUD, ZAR, KES, EGP, MAD, INR |
+| 0 | XOF, XAF (CFA francs), JPY |
+
+Codes are matched exactly (uppercase). Account creation rejects other codes with 400, and a transfer, deposit or withdrawal whose amount has more decimal places than its currency allows (e.g. `1500.50` XOF) fails with 422. Three-decimal currencies such as OMR are not supported yet (DESIGN.md decision #37).
 
 ## Authentication
 

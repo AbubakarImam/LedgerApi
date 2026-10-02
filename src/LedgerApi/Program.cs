@@ -71,7 +71,10 @@ try
         .UseNpgsql(builder.Configuration.GetConnectionString("LedgerDb"))
         .UseSnakeCaseNamingConvention());
 
-    builder.Services.Configure<FundingOptions>(builder.Configuration.GetSection("Funding"));
+    builder.Services.AddOptions<FundingOptions>()
+        .Bind(builder.Configuration.GetSection("Funding"))
+        .ValidateOnStart();
+    builder.Services.AddSingleton<IValidateOptions<FundingOptions>, FundingOptionsValidator>();
 
     // AuditLogger reads the actor, IP, user agent and correlation id of the current request.
     builder.Services.AddHttpContextAccessor();
