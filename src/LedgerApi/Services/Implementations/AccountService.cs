@@ -102,7 +102,7 @@ public class AccountService(LedgerDbContext dbContext, IAuditLogger auditLogger)
             .SumAsync(x => x.EntryType == EntryType.Credit ? x.Amount : -x.Amount, cancellationToken);
         return new BalanceResponse(
             account.AccountNumber,
-            balance,
+            SupportedCurrencies.ToCurrencyScale(balance, account.CurrencyCode),
             account.CurrencyCode,
             DateTime.UtcNow);
     }

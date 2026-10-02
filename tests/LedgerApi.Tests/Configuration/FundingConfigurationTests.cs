@@ -1,4 +1,5 @@
 using LedgerApi.Configuration;
+using LedgerApi.Entities;
 using LedgerApi.Tests.Fixtures;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,7 +24,7 @@ public class FundingConfigurationTests(ApiFixture fixture)
             var account = await ctx.Accounts.SingleOrDefaultAsync(a => a.AccountNumber == accountNumber);
             if (account is null)
                 problems.Add($"{currency}: {accountNumber} is not seeded");
-            else if (account.CurrencyCode != currency || account.AccountClass != Entities.AccountClass.System)
+            else if (account.CurrencyCode != currency || account.AccountClass != AccountClass.System)
                 problems.Add($"{currency}: {accountNumber} is {account.AccountClass} in {account.CurrencyCode}");
         }
 
