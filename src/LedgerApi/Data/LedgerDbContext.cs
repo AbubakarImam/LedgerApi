@@ -30,6 +30,7 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
             entity.HasIndex(t => t.Reference).IsUnique();
             entity.HasIndex(t => t.IdempotencyKey).IsUnique();
             entity.Property(t => t.Status).HasConversion<string>();
+            entity.ToTable(t => t.HasCheckConstraint("ck_transactions_status", "\"status\" IN ('Pending', 'Success', 'Failed')"));
         });
 
         modelBuilder.Entity<LedgerEntry>(entity =>
@@ -39,6 +40,7 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
             entity.Property(e => e.Amount).HasPrecision(18, 2);
             entity.HasIndex(e => new { e.AccountId, e.CreatedAt });
             entity.ToTable(t => t.HasCheckConstraint("ck_ledger_entries_amount_positive", "\"amount\" > 0"));
+            entity.ToTable(t => t.HasCheckConstraint("ck_ledger_entries_entry_type", "\"entry_type\" IN ('Debit', 'Credit')"));
 
             entity.HasOne(e => e.Transaction)
                 .WithMany(t => t.Entries)

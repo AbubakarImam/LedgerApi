@@ -22,6 +22,7 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
     // check if source account allows debit
     // check if destination account allows credit
     // Check currency matches on both account
+    // check the amount has no more decimal places than the currency allows
     //derived the balance of debit account
     // check balance sufficiency (system accounts can go to overdraft floor value)
     // write debit entry into account A
@@ -43,6 +44,12 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
         await dbTransaction.CommitAsync(cancellationToken);
         return new TransferResponse(transaction.Reference, transaction.Status.ToString(), transaction.FailureReason);
     }
+
+    // Rollback is cleanup, not work: it must run even if the client has disconnected, so it never takes
+    // the request's token. With a cancelled token it would throw before rolling back and hide the
+    // original exception (ReversalService does the same).
+    private static Task RollbackAsync(IDbContextTransaction dbTransaction) =>
+        dbTransaction.RollbackAsync(CancellationToken.None);
 
     private void RecordAudit(Transaction transaction, TransferRequest request, string? currency) =>
         auditLogger.Record(new AuditLog
@@ -84,7 +91,7 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
                 var dbInsertedTransaction = await dbContext.Transactions.FirstOrDefaultAsync(x => x.IdempotencyKey == request.IdempotencyKey, cancellationToken);
                 if (dbInsertedTransaction != null)
                 {
-                    await dbTransaction.RollbackAsync(cancellationToken);
+                    await RollbackAsync(dbTransaction);
                     return new TransferResponse(
                         dbInsertedTransaction.Reference,
                         dbInsertedTransaction.Status.ToString(),
@@ -95,20 +102,20 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
                 }
                 else
                 {
-                    await dbTransaction.RollbackAsync(cancellationToken);
+                    await RollbackAsync(dbTransaction);
 
                     throw new InvalidOperationException("Error retriving the result of the existing indemmpotency value");
                 }
             }
             else
             {
-                await dbTransaction.RollbackAsync(cancellationToken);
+                await RollbackAsync(dbTransaction);
                 throw new InvalidOperationException("Unexpected constraint violation");
             }
         }
         catch
         {
-            await dbTransaction.RollbackAsync(cancellationToken);
+            await RollbackAsync(dbTransaction);
             throw;
         }
 
@@ -127,7 +134,7 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
         }
         catch
         {
-            await dbTransaction.RollbackAsync(cancellationToken);
+            await RollbackAsync(dbTransaction);
             throw;
         }
         if (sourceAccount is null)
@@ -143,7 +150,7 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
         }
         catch
         {
-            await dbTransaction.RollbackAsync(cancellationToken); throw;
+            await RollbackAsync(dbTransaction); throw;
         }
         if (destinationAccount is null)
             return await FailTransferAsync(transaction, request, "Destination account not found", dbTransaction, cancellationToken);
@@ -159,6 +166,14 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
         // Check Currency Code
         if (sourceAccount.CurrencyCode != destinationAccount.CurrencyCode)
             return await FailTransferAsync(transaction, request, "Conflicting currency type", dbTransaction, cancellationToken);
+
+        // Check Amount fits the currency's decimal places (e.g. whole numbers only for XOF or JPY).
+        // Without this, decimal(18,2) would silently round 10.005 to 10.01 instead of rejecting it.
+        if (!SupportedCurrencies.DecimalPlaces.TryGetValue(sourceAccount.CurrencyCode, out var decimalPlaces))
+            return await FailTransferAsync(transaction, request, $"Currency {sourceAccount.CurrencyCode} is not supported", dbTransaction, cancellationToken);
+        if (decimal.Round(request.Amount, decimalPlaces) != request.Amount)
+            return await FailTransferAsync(transaction, request,
+                $"Amount has more decimal places than {sourceAccount.CurrencyCode} allows ({decimalPlaces})", dbTransaction, cancellationToken);
 
         //Derive account balance
         var balance = await dbContext.LedgerEntries.Where(x => x.AccountId == sourceAccount.Id)
@@ -223,7 +238,7 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
             await dbTransaction.CommitAsync(cancellationToken);
         } catch
         {
-            await dbTransaction.RollbackAsync(cancellationToken); throw;
+            await RollbackAsync(dbTransaction); throw;
         }
 
         return new TransferResponse(transaction.Reference, transaction.Status.ToString());
