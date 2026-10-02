@@ -181,9 +181,9 @@ Notifications (SMS/email) happen outside the database transaction. A flaky side-
 | account_number | **UNIQUE** — two formats: 10-digit random numeric for CUSTOMER accounts, currency-prefixed alphanumeric (currency code + 9 random digits, e.g. NGN100000021) for SYSTEM accounts (Section 6). The UNIQUE constraint backs the regenerate-on-collision loop for both formats. |
 | account_name | |
 | account_type | |
-| account_class | CHECK: 'CUSTOMER' or 'SYSTEM' |
+| account_class | CHECK: 'Customer' or 'System' (stored as the C# enum name) |
 | currency_code | |
-| status | CHECK: 'ACTIVE', 'FROZEN', or 'BLOCKED' |
+| status | CHECK: 'Active', 'Frozen' or 'Blocked' |
 | user_id | |
 | created_at | server-assigned |
 
@@ -194,7 +194,7 @@ Notifications (SMS/email) happen outside the database transaction. A flaky side-
 | reference | **UNIQUE** |
 | idempotency_key | **UNIQUE** — the idempotency store is collapsed into the envelope |
 | initiated_by | |
-| status | pending / success / failed |
+| status | CHECK: 'Pending', 'Success' or 'Failed' |
 | narration | |
 | created_at | server-assigned |
 | completed_at | |
@@ -206,7 +206,7 @@ Notifications (SMS/email) happen outside the database transaction. A flaky side-
 | id | PK |
 | transaction_id | FK → transactions |
 | account_id | FK → accounts |
-| entry_type | CHECK: 'DEBIT' or 'CREDIT' only |
+| entry_type | CHECK: 'Debit' or 'Credit' only |
 | amount | CHECK: amount > 0 — direction lives in entry_type; balance = SUM(credits) − SUM(debits). decimal(18,2), consistent with the two-decimal-currency scope (Section 1). |
 | currency | must equal the account's currency, validated inside the transaction (Section 4, step 4) |
 | created_at | server-assigned |
