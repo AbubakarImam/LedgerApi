@@ -7,10 +7,12 @@ using LedgerApi.Services;
 using LedgerApi.Validation;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using Serilog;
+using Serilog.Events;
 
 // Bootstrap logger: records errors that happen before configuration is loaded (e.g. a broken appsettings file).
 Log.Logger = new LoggerConfiguration()
@@ -79,6 +81,10 @@ try
     // AuditLogger reads the actor, IP, user agent and correlation id of the current request.
     builder.Services.AddHttpContextAccessor();
 
+    // Health checks for the hosting platform: "ready" includes the database, "live" checks only the process.
+    builder.Services.AddHealthChecks()
+        .AddDbContextCheck<LedgerDbContext>("database", tags: ["ready"]);
+
     builder.Services.AddScoped<ITransferService, TransferService>();
     builder.Services.AddScoped<IReversalService, ReversalService>();
     builder.Services.AddScoped<IAccountService, AccountService>();
@@ -101,6 +107,12 @@ try
     // One structured log line per request: method, path, status code and elapsed time, plus these extras.
     app.UseSerilogRequestLogging(options =>
     {
+        // Platforms probe /health every few seconds; log those only when they fail.
+        options.GetLevel = (httpContext, _, exception) =>
+            exception is not null || httpContext.Response.StatusCode >= 500 ? LogEventLevel.Error
+            : httpContext.Request.Path.StartsWithSegments("/health") ? LogEventLevel.Verbose
+            : LogEventLevel.Information;
+
         options.EnrichDiagnosticContext = (diagnosticContext, httpContext) =>
         {
             diagnosticContext.Set("UserId", httpContext.User.Identity?.Name ?? "anonymous");
@@ -124,6 +136,12 @@ try
     app.UseAuthorization();
 
     app.MapControllers();
+
+    // Anonymous on purpose: platforms probe without an API key. They answer only "Healthy" or "Unhealthy",
+    // never details. Live = the process responds (restart if not); ready = it can reach the database
+    // (send traffic only if so).
+    app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
+    app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") }).AllowAnonymous();
 
     app.Run();
 }
