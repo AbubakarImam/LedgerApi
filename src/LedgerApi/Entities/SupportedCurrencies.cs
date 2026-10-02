@@ -37,4 +37,21 @@ public static class SupportedCurrencies
     // Codes are matched exactly: "ngn" is rejected rather than stored and never matched again.
     public static bool IsSupported(string? currencyCode) =>
         currencyCode is not null && DecimalPlaces.ContainsKey(currencyCode);
+
+    // Gives an amount exactly the currency's number of decimal places, so it serializes as 1500 for XOF
+    // and 10.50 or 0.00 for NGN. Only the scale changes, never the value: an amount that does not fit
+    // (which the transfer precision check prevents) or an unknown currency is returned unchanged.
+    public static decimal ToCurrencyScale(decimal amount, string currencyCode)
+    {
+        if (!DecimalPlaces.TryGetValue(currencyCode, out var places))
+            return amount;
+
+        var rounded = decimal.Round(amount, places);
+        if (rounded != amount)
+            return amount;
+
+        // decimal.Round can remove decimal places but never adds them; adding a zero with the
+        // currency's scale does (0 + 0.00m is 0.00).
+        return places == 0 ? rounded : rounded + new decimal(0, 0, 0, false, (byte)places);
+    }
 }

@@ -83,7 +83,7 @@ Service tests run against a real PostgreSQL container started by [Testcontainers
 | 2 | USD, EUR, GBP, NGN, CNY, GHS, SAR, QAR, AED, CHF, CAD, AUD, ZAR, KES, EGP, MAD, INR |
 | 0 | XOF, XAF (CFA francs), JPY |
 
-Codes are matched exactly (uppercase). Account creation rejects other codes with 400, and a transfer, deposit or withdrawal whose amount has more decimal places than its currency allows (e.g. `1500.50` XOF) fails with 422. Three-decimal currencies such as OMR are not supported yet (DESIGN.md decision #37).
+Codes are matched exactly (uppercase). Account creation rejects other codes with 400, and a transfer, deposit or withdrawal whose amount has more decimal places than its currency allows (e.g. `1500.50` XOF) fails with 422. Balances are returned with the currency's decimal places: `1500` for XOF or JPY, `10.50` or `0.00` for NGN. Three-decimal currencies such as OMR are not supported yet (DESIGN.md decision #37).
 
 ## Authentication
 
