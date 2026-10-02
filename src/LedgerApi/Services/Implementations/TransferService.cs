@@ -44,6 +44,12 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
         return new TransferResponse(transaction.Reference, transaction.Status.ToString(), transaction.FailureReason);
     }
 
+    // Rollback is cleanup, not work: it must run even if the client has disconnected, so it never takes
+    // the request's token. With a cancelled token it would throw before rolling back and hide the
+    // original exception (ReversalService does the same).
+    private static Task RollbackAsync(IDbContextTransaction dbTransaction) =>
+        dbTransaction.RollbackAsync(CancellationToken.None);
+
     private void RecordAudit(Transaction transaction, TransferRequest request, string? currency) =>
         auditLogger.Record(new AuditLog
         {
@@ -84,7 +90,7 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
                 var dbInsertedTransaction = await dbContext.Transactions.FirstOrDefaultAsync(x => x.IdempotencyKey == request.IdempotencyKey, cancellationToken);
                 if (dbInsertedTransaction != null)
                 {
-                    await dbTransaction.RollbackAsync(cancellationToken);
+                    await RollbackAsync(dbTransaction);
                     return new TransferResponse(
                         dbInsertedTransaction.Reference,
                         dbInsertedTransaction.Status.ToString(),
@@ -95,20 +101,20 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
                 }
                 else
                 {
-                    await dbTransaction.RollbackAsync(cancellationToken);
+                    await RollbackAsync(dbTransaction);
 
                     throw new InvalidOperationException("Error retriving the result of the existing indemmpotency value");
                 }
             }
             else
             {
-                await dbTransaction.RollbackAsync(cancellationToken);
+                await RollbackAsync(dbTransaction);
                 throw new InvalidOperationException("Unexpected constraint violation");
             }
         }
         catch
         {
-            await dbTransaction.RollbackAsync(cancellationToken);
+            await RollbackAsync(dbTransaction);
             throw;
         }
 
@@ -127,7 +133,7 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
         }
         catch
         {
-            await dbTransaction.RollbackAsync(cancellationToken);
+            await RollbackAsync(dbTransaction);
             throw;
         }
         if (sourceAccount is null)
@@ -143,7 +149,7 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
         }
         catch
         {
-            await dbTransaction.RollbackAsync(cancellationToken); throw;
+            await RollbackAsync(dbTransaction); throw;
         }
         if (destinationAccount is null)
             return await FailTransferAsync(transaction, request, "Destination account not found", dbTransaction, cancellationToken);
@@ -223,7 +229,7 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
             await dbTransaction.CommitAsync(cancellationToken);
         } catch
         {
-            await dbTransaction.RollbackAsync(cancellationToken); throw;
+            await RollbackAsync(dbTransaction); throw;
         }
 
         return new TransferResponse(transaction.Reference, transaction.Status.ToString());
