@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch: # "Run workflow" button: redeploy main without a new commit
 
 permissions:
   contents: read
@@ -58,3 +59,87 @@ jobs:
           target: migrator
           push: false
           cache-from: type=gha
+
+  # Deploys main to the App Service after the tests and image builds pass. Migrations run first,
+  # from this runner, and the app is only updated if they succeed (DESIGN.md decision #39).
+  deploy:
+    needs: [test, docker]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # lets azure/login exchange GitHub's OIDC token: no Azure password is stored anywhere
+      contents: read
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false # never stop a deploy halfway
+    env:
+      RESOURCE_GROUP: ledger-rg
+      APP_NAME: ledgerapi
+      DB_SERVER: ledgerapi-db-san
+      APP_URL: https://ledgerapi-c5f8ckevape7abap.southafricanorth-01.azurewebsites.net
+      FIREWALL_RULE: github-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Publish the API project only: publishing the solution also ships the test project.
+      - name: Publish the API
+        run: |
+          dotnet publish src/LedgerApi/LedgerApi.csproj -c Release -o publish
+          rm -f publish/appsettings.Development.json
+          (cd publish && zip -qr ../app.zip .)
+
+      - name: Build the migration bundle
+        run: |
+          dotnet tool restore
+          dotnet ef migrations bundle --project src/LedgerApi --configuration Release --output efbundle
+
+      # Managed identity ledgerapi-id-b111, trusted for this repo's main branch (set up by Deployment Center).
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_944A7AB5A2AA4D51B638508733177791 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_04FAF9A6CD3C42F2ADAFD23192F99BE7 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6E20A26DFDD4408B9F3F1B29B51767AB }}
+
+      # The App Service setting is the single source of truth: the connection string is not copied into GitHub.
+      - name: Read the connection string from App Service
+        run: |
+          cs=$(az webapp config connection-string list -g "$RESOURCE_GROUP" -n "$APP_NAME" --query "[?name=='LedgerDb'].value | [0]" -o tsv)
+          if [ -z "$cs" ]; then echo "::error::App Service has no LedgerDb connection string"; exit 1; fi
+          echo "::add-mask::$cs"
+          echo "LEDGERDB=$cs" >> "$GITHUB_ENV"
+
+      - name: Allow this runner through the database firewall
+        run: |
+          ip=$(curl -fsS https://api.ipify.org)
+          az postgres flexible-server firewall-rule create -g "$RESOURCE_GROUP" --server-name "$DB_SERVER" \
+            --name "$FIREWALL_RULE" --start-ip-address "$ip" --end-ip-address "$ip" -o none
+
+      - name: Apply migrations
+        run: ./efbundle --connection "$LEDGERDB"
+
+      # Runs even when an earlier step failed, so the runner's IP never stays allowed.
+      - name: Remove the runner's firewall rule
+        if: always()
+        run: |
+          az postgres flexible-server firewall-rule delete -g "$RESOURCE_GROUP" --server-name "$DB_SERVER" \
+            --name "$FIREWALL_RULE" --yes -o none || true
+
+      # --clean empties wwwroot first, so files from older deployments cannot linger.
+      - name: Deploy to App Service
+        run: az webapp deploy -g "$RESOURCE_GROUP" -n "$APP_NAME" --src-path app.zip --type zip --clean true
+
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 30); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/health/ready")" = "200" ] && break
+            sleep 10
+          done
+          ready=$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/health/ready")
+          unauthenticated=$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/api/accounts/NGN100000001")
+          echo "/health/ready: $ready, request without a key: $unauthenticated"
+          [ "$ready" = "200" ] || { echo "::error::/health/ready did not return 200"; exit 1; }
+          [ "$unauthenticated" = "401" ] || { echo "::error::the API did not reject a request without a key"; exit 1; }
