@@ -169,6 +169,17 @@ docker run -p 8080:8080 \
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the tests and builds both images on every pull request and push to `main`.
 
+### Azure (production)
+
+Production runs on **Azure App Service** (`ledgerapi`, Linux, .NET 8) with **PostgreSQL Flexible Server** (`ledgerapi-db-san`), both in South Africa North, in resource group `ledger-rg`. Every push to `main` that passes the tests is deployed by the `deploy` job in `ci.yml` (or press **Run workflow** to redeploy):
+
+1. Publishes `src/LedgerApi` only (never the solution) without `appsettings.Development.json`.
+2. Opens the database firewall to the runner's IP, applies the migration bundle, then removes the rule.
+3. Zip-deploys with `--clean`, so no files from older deployments remain.
+4. Smoke-tests `/health/ready` (200) and a request without a key (401).
+
+Configuration lives in the App Service: the `LedgerDb` connection string (type **Custom**: .NET 8 ignores the PostgreSQL type) and the `ApiKeys__Clients__…` settings. The deploy job reads the connection string from there; it is not stored in GitHub. Always call the API over **https**.
+
 ## Project layout
 
 ```
