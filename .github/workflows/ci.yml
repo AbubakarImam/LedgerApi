@@ -9,9 +9,11 @@ on:
 permissions:
   contents: read
 
-# A new push to the same branch or PR cancels the run still in progress.
+# A new push to the same branch or PR cancels the run still in progress. The event name and the PR's own
+# branch (head_ref, empty for pushes) keep PR runs out of main's group: a late pull_request event for an
+# already-merged PR once landed in main's group and cancelled the main run before it could deploy.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
