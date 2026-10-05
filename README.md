@@ -12,6 +12,61 @@ The design, including every trade-off, is in [docs/DESIGN.md](docs/DESIGN.md). S
 - **Idempotency.** Money-moving requests carry a client idempotency key, enforced by a unique constraint. A retry with the same key returns the stored result.
 - **No overdraft under concurrency.** The debited account is locked (`SELECT … FOR UPDATE`) while its balance is checked.
 
+## Try it live
+
+The API runs on Azure with interactive docs:
+
+**https://ledgerapi-c5f8ckevape7abap.southafricanorth-01.azurewebsites.net/swagger**
+
+Anyone can read the docs. To send requests you need a **demo API key**: ask [@AbubakarImam](https://github.com/AbubakarImam) for one (keys are shared privately and never committed). Then click **Authorize** in Swagger, paste the key and close the dialog. Swagger remembers it after a reload.
+
+The demo key can create accounts, fund them, transfer, withdraw and reverse. It cannot create system accounts (that returns **403**).
+
+### A five-minute walkthrough
+
+Use **Try it out** on each endpoint. Anything in `<angle brackets>` comes from an earlier response.
+
+1. **Create two accounts.** `POST /api/accounts`, once for each:
+   ```json
+   { "accountName": "Ada", "accountType": "Savings", "currencyCode": "NGN" }
+   ```
+   ```json
+   { "accountName": "Bola", "accountType": "Wallet", "currencyCode": "NGN" }
+   ```
+   Each response has a 10-digit `accountNumber`. Note both.
+
+2. **Fund the first account.** `POST /api/deposits` moves money in from the ledger's NGN funding account:
+   ```json
+   { "customerAccountNumber": "<Ada's account>", "amount": 5000, "narration": "Initial funding", "idempotencyKey": "<your-name>-deposit-1" }
+   ```
+   Replace `<your-name>` in every `idempotencyKey`. Keys are unique across the whole ledger, so a key another visitor already used would return *their* stored result instead of creating yours.
+
+3. **Transfer between them.** `POST /api/transfers`:
+   ```json
+   { "debitAccountNumber": "<Ada's account>", "creditAccountNumber": "<Bola's account>", "amount": 1500, "narration": "Rent", "idempotencyKey": "<your-name>-transfer-1" }
+   ```
+   The response has a `reference` like `TXN-7KQ2M9XH4TPLW3R`. Note it.
+
+4. **Check the balances.** `GET /api/accounts/{accountNumber}/balance` for each account: Ada has `3500.00`, Bola `1500.00`. Balances are never stored; they are computed from the ledger entries every time.
+
+5. **Retry the same transfer.** Send step 3 again, unchanged. You get **the same `reference`** and the balances do not move: the idempotency key guarantees a request moves money at most once, which is what makes retries after a timeout safe.
+
+6. **Try to overspend.** Transfer `100000` from Bola to Ada with a new idempotency key (e.g. `<your-name>-transfer-2`). The response is **422** with `"status": "Failed"` and `"failureReason": "Insufficient Account Balance"`, and no money moves. The failed attempt is still recorded, so retrying it with the same key returns the same 422.
+
+7. **Reverse the transfer.** `POST /api/reversals`:
+   ```json
+   { "originalTransactionReference": "<reference from step 3>", "reason": "Customer dispute" }
+   ```
+   The balances return to `5000.00` and `0.00`. Nothing was deleted: the reversal is a new transaction with opposite entries, so the history shows both. Reversing the same transfer again returns **409**.
+
+8. **Try another currency.** Create an `XOF` (CFA franc) account and deposit `1500.50` into it: the response is **422**, because the CFA franc has no decimal places. `1500` works, and its balance shows as `1500`.
+
+### What to look for
+
+- **401** means the key is missing or wrong; **403** means the key is valid but not allowed to do that.
+- Every response has an `X-Correlation-ID` header, and error bodies include the same `correlationId`. Quote it when reporting a problem.
+- Everything you create is shared with other visitors and stays in the demo database.
+
 ## Prerequisites
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (pinned by `global.json`)
@@ -179,6 +234,17 @@ Production runs on **Azure App Service** (`ledgerapi`, Linux, .NET 8) with **Pos
 4. Smoke-tests `/health/ready` (200) and a request without a key (401).
 
 **Swagger on Azure** (showcase): set the App Service setting `Swagger__Enabled=true` and open `/swagger` on the app's URL. Anyone can read the docs, but trying a request needs an API key; give each visitor their own key so it can be revoked separately (DESIGN.md decision #41). Set it to `false` if the deployment ever carries real money.
+
+**Issuing demo keys.** Give each visitor their own key, so access can be revoked one person at a time and the audit trail shows who did what (`actor_id = demo-<name>`). From a Mac signed in with `az login`:
+
+```bash
+scripts/demo-key.sh issue amina    # creates client demo-amina and saves its key to your Keychain
+scripts/demo-key.sh rotate amina   # replaces amina's key; the old one stops working
+scripts/demo-key.sh revoke amina   # removes amina's access and the Keychain entry
+scripts/demo-key.sh list           # shows the configured API clients
+```
+
+Keys are never printed: `issue` tells you how to copy one from the Keychain, and you send it privately with the Swagger link. Demo keys have every scope except `ledger.admin`. The script only manages `demo-<name>` clients, so it cannot change `payment-api` or `ops-console`. Each command restarts the app, so the API is unavailable for a minute or so: avoid running it during a live demo.
 
 Configuration lives in the App Service: the `LedgerDb` connection string (type **Custom**: .NET 8 ignores the PostgreSQL type) and the `ApiKeys__Clients__…` settings. The deploy job reads the connection string from there; it is not stored in GitHub. Always call the API over **https**.
 
