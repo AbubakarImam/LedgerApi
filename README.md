@@ -109,7 +109,7 @@ A missing or unknown key gets **401**; a valid key without the endpoint's scope 
 | `dev-payment-api` | `lk_dev_payment_wj6C4L8LnpS03vUDi_UV6CZJClsr4SBc` | read, accounts, transfer, funding |
 | `dev-ops` | `lk_dev_ops_1pGPvWKNhflS5oblWCbjHC6a0f6buOri` | read, reverse, admin |
 
-In Swagger UI, click **Authorize** and paste a key.
+In Swagger UI (http://localhost:5293/swagger), click **Authorize** and paste one of these keys. You never need to generate keys for local development, and Swagger remembers the key after a page reload.
 
 ### Issuing a key
 
@@ -177,6 +177,8 @@ Production runs on **Azure App Service** (`ledgerapi`, Linux, .NET 8) with **Pos
 2. Opens the database firewall to the runner's IP, applies the migration bundle, then removes the rule.
 3. Zip-deploys with `--clean`, so no files from older deployments remain.
 4. Smoke-tests `/health/ready` (200) and a request without a key (401).
+
+**Swagger on Azure** (showcase): set the App Service setting `Swagger__Enabled=true` and open `/swagger` on the app's URL. Anyone can read the docs, but trying a request needs an API key; give each visitor their own key so it can be revoked separately (DESIGN.md decision #41). Set it to `false` if the deployment ever carries real money.
 
 Configuration lives in the App Service: the `LedgerDb` connection string (type **Custom**: .NET 8 ignores the PostgreSQL type) and the `ApiKeys__Clients__…` settings. The deploy job reads the connection string from there; it is not stored in GitHub. Always call the API over **https**.
 
