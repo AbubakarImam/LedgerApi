@@ -30,6 +30,9 @@ try
         .Enrich.FromLogContext());
 
     builder.Services.AddControllers(options => options.Filters.Add<IdempotencyKeyLoggingFilter>());
+    // Lowercase route URLs in generated links and the Swagger docs (/api/transfers, not /api/Transfers).
+    // Matching was already case-insensitive, so existing callers are unaffected.
+    builder.Services.AddRouting(options => options.LowercaseUrls = true);
     // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen(options =>
@@ -121,10 +124,13 @@ try
     });
 
     // Configure the HTTP request pipeline.
-    if (app.Environment.IsDevelopment())
+    // Swagger: always in Development; elsewhere only when Swagger:Enabled is true (the public showcase,
+    // decision #41). The docs are public, but every call made from them still needs an API key.
+    if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Swagger:Enabled"))
     {
         app.UseSwagger();
-        app.UseSwaggerUI();
+        // Remember the key pasted into Authorize across page reloads (stored in the visitor's own browser).
+        app.UseSwaggerUI(options => options.EnablePersistAuthorization());
     }
 
     app.UseMiddleware<ExceptionHandlingMiddleware>();

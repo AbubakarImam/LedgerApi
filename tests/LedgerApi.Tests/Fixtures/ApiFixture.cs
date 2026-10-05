@@ -34,6 +34,8 @@ public class ApiFixture : IAsyncLifetime
         {
             ["ConnectionStrings:LedgerDb"] = _container.GetConnectionString(),
             ["Serilog:MinimumLevel:Default"] = "Warning",
+            // The Testing environment is not Development, so this exercises the showcase switch.
+            ["Swagger:Enabled"] = "true",
         };
 
         var clients = LedgerScopes.All
