@@ -28,7 +28,9 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
         {
             entity.HasKey(t => t.Id);
             entity.HasIndex(t => t.Reference).IsUnique();
-            entity.HasIndex(t => t.IdempotencyKey).IsUnique();
+            // Keys are scoped to the calling client (decision #42). Nulls are not distinct, so rows from before
+            // initiated_by was recorded still cannot share a key with each other.
+            entity.HasIndex(t => new { t.InitiatedBy, t.IdempotencyKey }).IsUnique().AreNullsDistinct(false);
             entity.Property(t => t.Status).HasConversion<string>();
             entity.ToTable(t => t.HasCheckConstraint("ck_transactions_status", "\"status\" IN ('Pending', 'Success', 'Failed')"));
         });

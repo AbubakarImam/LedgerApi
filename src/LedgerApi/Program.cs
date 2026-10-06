@@ -83,6 +83,7 @@ try
 
     // AuditLogger reads the actor, IP, user agent and correlation id of the current request.
     builder.Services.AddHttpContextAccessor();
+    builder.Services.AddScoped<ICurrentClient, HttpCurrentClient>();
 
     // Health checks for the hosting platform: "ready" includes the database, "live" checks only the process.
     builder.Services.AddHealthChecks()
