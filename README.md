@@ -9,7 +9,7 @@ The design, including every trade-off, is in [docs/DESIGN.md](docs/DESIGN.md). S
 - **Double entry.** Every successful transaction writes exactly one debit and one matching credit, in one database transaction.
 - **Derived balances.** There is no balance column. A balance is `SUM(credits) − SUM(debits)` over an account's entries.
 - **Append-only.** Entries are never updated or deleted. A reversal writes new opposite entries.
-- **Idempotency.** Money-moving requests carry a client idempotency key, enforced by a unique constraint. A retry with the same key returns the stored result.
+- **Idempotency.** Money-moving requests carry an idempotency key, unique per API client. An exact retry returns the stored result; the same key with a different request gets 409.
 - **No overdraft under concurrency.** The debited account is locked (`SELECT … FOR UPDATE`) while its balance is checked.
 
 ## Try it live
@@ -39,7 +39,7 @@ Use **Try it out** on each endpoint. Anything in `<angle brackets>` comes from a
    ```json
    { "customerAccountNumber": "<Ada's account>", "amount": 5000, "narration": "Initial funding", "idempotencyKey": "<your-name>-deposit-1" }
    ```
-   Replace `<your-name>` in every `idempotencyKey`. Keys are unique across the whole ledger, so a key another visitor already used would return *their* stored result instead of creating yours.
+   Use your own `idempotencyKey` values. Keys are scoped to your API key, so other visitors cannot collide with you, and each key is tied to the request it was first used for: reusing it with a different amount or account returns **409**.
 
 3. **Transfer between them.** `POST /api/transfers`:
    ```json
@@ -127,7 +127,7 @@ Service tests run against a real PostgreSQL container started by [Testcontainers
 | `401` | Missing or unknown API key |
 | `403` | The API key lacks the endpoint's scope |
 | `404` | Account or transaction not found |
-| `409` | Transaction already reversed |
+| `409` | Transaction already reversed, or an idempotency key reused with a different request |
 | `422` | A business rule failed: insufficient funds, account status, currency mismatch, or a transaction that can't be reversed. For transfers, deposits and withdrawals the failure is committed and the body carries `reference`, `status: "Failed"` and `failureReason`. A retry with the same idempotency key returns the same 422. |
 | `500` | Unexpected error. Retry with the **same** idempotency key to learn whether money moved. |
 

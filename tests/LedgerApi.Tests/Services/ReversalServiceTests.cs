@@ -45,7 +45,7 @@ public class ReversalServiceTests : IAsyncLifetime
     private async Task<string> TransferAsync(string debit, string credit, decimal amount)
     {
         await using var ctx = _fixture.CreateContext();
-        var response = await new TransferService(ctx, TestAudit.For(ctx)).TransferAsync(
+        var response = await new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default).TransferAsync(
             new TransferRequest(debit, credit, amount, "Seed transfer", Guid.NewGuid().ToString()));
         return response.Reference;
     }
@@ -60,7 +60,7 @@ public class ReversalServiceTests : IAsyncLifetime
     private async Task<Contracts.Responses.TransactionResponse> ReverseAsync(string reference, string? reason = null)
     {
         await using var ctx = _fixture.CreateContext();
-        return await new ReversalService(ctx, TestAudit.For(ctx)).ReverseAsync(new ReversalRequest(reference, reason));
+        return await new ReversalService(ctx, TestAudit.For(ctx), TestCaller.Default).ReverseAsync(new ReversalRequest(reference, reason));
     }
 
     [Fact]

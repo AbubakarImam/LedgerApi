@@ -1,4 +1,5 @@
 using LedgerApi.Auditing;
+using LedgerApi.Authorization;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Data;
@@ -9,7 +10,7 @@ using Npgsql;
 
 namespace LedgerApi.Services;
 
-public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger) : IReversalService
+public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger, ICurrentClient currentClient) : IReversalService
 {
     // Decision #14: a system account may go negative, but never below this floor.
     private const decimal SystemAccountOverdraftFloor = -1_000_000_000_000m;
@@ -80,6 +81,7 @@ public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger
             // Reversals carry no client key: the unique reversals row is their idempotency guard.
             // The column is still required and unique, so it gets a server-generated value.
             IdempotencyKey = $"REVERSAL-{Guid.NewGuid()}",
+            InitiatedBy = currentClient.ClientId,
             Status = TransactionStatus.Pending,
             Narration = request.Reason ?? $"Reversal of {original.Reference}",
             CreatedAt = now,

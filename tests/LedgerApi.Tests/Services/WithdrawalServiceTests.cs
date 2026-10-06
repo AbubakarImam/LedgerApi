@@ -75,7 +75,7 @@ public class WithdrawalServiceTests : IAsyncLifetime
         {
             Accounts = funding ?? new Dictionary<string, string> { ["NGN"] = FundingNumber }
         });
-        return new WithdrawalService(new TransferService(ctx, TestAudit.For(ctx)), ctx, options);
+        return new WithdrawalService(new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default), ctx, options);
     }
 
     private static async Task<decimal> BalanceAsync(LedgerDbContext ctx, string accountNumber) =>

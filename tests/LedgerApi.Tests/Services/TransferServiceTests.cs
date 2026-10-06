@@ -1,6 +1,7 @@
 using LedgerApi.Auditing;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Entities;
+using LedgerApi.Exceptions;
 using LedgerApi.Services;
 using LedgerApi.Tests.Fixtures;
 using Microsoft.EntityFrameworkCore;
@@ -47,7 +48,7 @@ public class TransferServiceTests : IAsyncLifetime
         ctx.Accounts.AddRange(sourceAccount,  destinationAccount);
         await ctx.SaveChangesAsync();
 
-        var service = new TransferService(ctx, TestAudit.For(ctx));
+        var service = new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default);
         var request = new TransferRequest(
             DebitAccountNumber: sourceAccount.AccountNumber,
             CreditAccountNumber: destinationAccount.AccountNumber,
@@ -113,7 +114,7 @@ public class TransferServiceTests : IAsyncLifetime
         ctx.Accounts.AddRange(sourceAccount, destinationAccount);
         await ctx.SaveChangesAsync();
 
-        var service = new TransferService(ctx, TestAudit.For(ctx));
+        var service = new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default);
         var request = new TransferRequest(
             DebitAccountNumber: sourceAccount.AccountNumber,
             CreditAccountNumber: destinationAccount.AccountNumber,
@@ -175,10 +176,10 @@ public class TransferServiceTests : IAsyncLifetime
             IdempotencyKey: idempotencyKey);
 
         await using var ctx1 = _fixture.CreateContext();
-        var firstResponse = await new TransferService(ctx1, TestAudit.For(ctx1)).TransferAsync(request);
+        var firstResponse = await new TransferService(ctx1, TestAudit.For(ctx1), TestCaller.Default).TransferAsync(request);
 
         await using var ctx2 = _fixture.CreateContext();
-        var secondResponse = await new TransferService(ctx2, TestAudit.For(ctx2)).TransferAsync(request);
+        var secondResponse = await new TransferService(ctx2, TestAudit.For(ctx2), TestCaller.Default).TransferAsync(request);
 
         Assert.Equal(firstResponse.Reference,  secondResponse.Reference);
         Assert.Equal(firstResponse.Status,  secondResponse.Status);
@@ -218,7 +219,7 @@ public class TransferServiceTests : IAsyncLifetime
         ctx.Accounts.AddRange(sourceAccount, destinationAccount);
         await ctx.SaveChangesAsync();
 
-        var service = new TransferService(ctx, TestAudit.For(ctx));
+        var service = new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default);
         var request = new TransferRequest(
             DebitAccountNumber: sourceAccount.AccountNumber,
             CreditAccountNumber: destinationAccount.AccountNumber,
@@ -269,7 +270,7 @@ public class TransferServiceTests : IAsyncLifetime
         ctx.Accounts.AddRange(sourceAccount, destinationAccount);
         await ctx.SaveChangesAsync();
 
-        var service = new TransferService(ctx, TestAudit.For(ctx));
+        var service = new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default);
         var request = new TransferRequest(
             DebitAccountNumber: "0000000000",
             CreditAccountNumber: destinationAccount.AccountNumber,
@@ -320,7 +321,7 @@ public class TransferServiceTests : IAsyncLifetime
         ctx.Accounts.AddRange(sourceAccount, destinationAccount);
         await ctx.SaveChangesAsync();
 
-        var service = new TransferService(ctx, TestAudit.For(ctx));
+        var service = new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default);
         var request = new TransferRequest(
             DebitAccountNumber: sourceAccount.AccountNumber,
             CreditAccountNumber: "",
@@ -371,7 +372,7 @@ public class TransferServiceTests : IAsyncLifetime
         ctx.Accounts.AddRange(sourceAccount, destinationAccount);
         await ctx.SaveChangesAsync();
 
-        var service = new TransferService(ctx, TestAudit.For(ctx));
+        var service = new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default);
         var request = new TransferRequest(
             DebitAccountNumber: sourceAccount.AccountNumber,
             CreditAccountNumber: destinationAccount.AccountNumber,
@@ -422,7 +423,7 @@ public class TransferServiceTests : IAsyncLifetime
         ctx.Accounts.AddRange(sourceAccount, destinationAccount);
         await ctx.SaveChangesAsync();
 
-        var service = new TransferService(ctx, TestAudit.For(ctx));
+        var service = new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default);
         var request = new TransferRequest(
             DebitAccountNumber: sourceAccount.AccountNumber,
             CreditAccountNumber: destinationAccount.AccountNumber,
@@ -473,7 +474,7 @@ public class TransferServiceTests : IAsyncLifetime
         ctx.Accounts.AddRange(sourceAccount, destinationAccount);
         await ctx.SaveChangesAsync();
 
-        var service = new TransferService(ctx, TestAudit.For(ctx));
+        var service = new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default);
         var request = new TransferRequest(
             DebitAccountNumber: sourceAccount.AccountNumber,
             CreditAccountNumber: destinationAccount.AccountNumber,
@@ -524,7 +525,7 @@ public class TransferServiceTests : IAsyncLifetime
         ctx.Accounts.AddRange(sourceAccount, destinationAccount);
         await ctx.SaveChangesAsync();
 
-        var service = new TransferService(ctx, TestAudit.For(ctx));
+        var service = new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default);
         var request = new TransferRequest(
             DebitAccountNumber: sourceAccount.AccountNumber,
             CreditAccountNumber: destinationAccount.AccountNumber,
@@ -583,10 +584,10 @@ public class TransferServiceTests : IAsyncLifetime
             IdempotencyKey: Guid.NewGuid().ToString());
 
         await using var ctx1 = _fixture.CreateContext();
-        var firstResponse = await new TransferService(ctx1, TestAudit.For(ctx1)).TransferAsync(request);
+        var firstResponse = await new TransferService(ctx1, TestAudit.For(ctx1), TestCaller.Default).TransferAsync(request);
 
         await using var ctx2 = _fixture.CreateContext();
-        var retryResponse = await new TransferService(ctx2, TestAudit.For(ctx2)).TransferAsync(request);
+        var retryResponse = await new TransferService(ctx2, TestAudit.For(ctx2), TestCaller.Default).TransferAsync(request);
 
         Assert.Equal("Failed", retryResponse.Status);
         Assert.Equal(firstResponse.Reference, retryResponse.Reference);
@@ -622,7 +623,7 @@ public class TransferServiceTests : IAsyncLifetime
         var (system, customer) = await SeedAuditAccountsAsync();
         await using var ctx = _fixture.CreateContext();
 
-        var response = await new TransferService(ctx, TestAudit.For(ctx)).TransferAsync(
+        var response = await new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default).TransferAsync(
             new TransferRequest(system.AccountNumber, customer.AccountNumber, 250m, "Audit test", Guid.NewGuid().ToString()));
 
         await using var verifyCtx = _fixture.CreateContext();
@@ -644,7 +645,7 @@ public class TransferServiceTests : IAsyncLifetime
         await using var ctx = _fixture.CreateContext();
 
         // Customer has no funds, so this commits as Failed.
-        var response = await new TransferService(ctx, TestAudit.For(ctx)).TransferAsync(
+        var response = await new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default).TransferAsync(
             new TransferRequest(customer.AccountNumber, system.AccountNumber, 250m, "Audit test", Guid.NewGuid().ToString()));
 
         await using var verifyCtx = _fixture.CreateContext();
@@ -661,9 +662,9 @@ public class TransferServiceTests : IAsyncLifetime
         var request = new TransferRequest(system.AccountNumber, customer.AccountNumber, 250m, "Audit test", Guid.NewGuid().ToString());
 
         await using (var ctx1 = _fixture.CreateContext())
-            await new TransferService(ctx1, TestAudit.For(ctx1)).TransferAsync(request);
+            await new TransferService(ctx1, TestAudit.For(ctx1), TestCaller.Default).TransferAsync(request);
         await using (var ctx2 = _fixture.CreateContext())
-            await new TransferService(ctx2, TestAudit.For(ctx2)).TransferAsync(request);
+            await new TransferService(ctx2, TestAudit.For(ctx2), TestCaller.Default).TransferAsync(request);
 
         await using var verifyCtx = _fixture.CreateContext();
         Assert.Equal(1, await verifyCtx.AuditLogs.CountAsync());
@@ -698,7 +699,7 @@ public class TransferServiceTests : IAsyncLifetime
         var (system, customer) = await SeedCurrencyAccountsAsync(currency);
         await using var ctx = _fixture.CreateContext();
 
-        var response = await new TransferService(ctx, TestAudit.For(ctx)).TransferAsync(new TransferRequest(
+        var response = await new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default).TransferAsync(new TransferRequest(
             system.AccountNumber, customer.AccountNumber, decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture),
             "Precision test", Guid.NewGuid().ToString()));
 
@@ -718,10 +719,148 @@ public class TransferServiceTests : IAsyncLifetime
         var (system, customer) = await SeedCurrencyAccountsAsync(currency);
         await using var ctx = _fixture.CreateContext();
 
-        var response = await new TransferService(ctx, TestAudit.For(ctx)).TransferAsync(new TransferRequest(
+        var response = await new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default).TransferAsync(new TransferRequest(
             system.AccountNumber, customer.AccountNumber, decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture),
             "Precision test", Guid.NewGuid().ToString()));
 
         Assert.Equal("Success", response.Status);
+    }
+
+    // ---- Idempotency keys are scoped per client and bound to the request (decision #42) ----
+
+    private async Task<(Account System, Account Customer)> SeedIdempotencyAccountsAsync()
+    {
+        await using var ctx = _fixture.CreateContext();
+        var system = new Account
+        {
+            AccountNumber = "NGN-IDEM-SYS", AccountName = "Idempotency System", AccountType = AccountType.Wallet,
+            AccountClass = AccountClass.System, CurrencyCode = "NGN", Status = AccountStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        var customer = new Account
+        {
+            AccountNumber = "1000000080", AccountName = "Idempotency Customer", AccountType = AccountType.Wallet,
+            AccountClass = AccountClass.Customer, CurrencyCode = "NGN", Status = AccountStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        ctx.Accounts.AddRange(system, customer);
+        await ctx.SaveChangesAsync();
+        return (system, customer);
+    }
+
+    private async Task<Contracts.Responses.TransferResponse> SendAsync(TransferRequest request, string? clientId = "test-client")
+    {
+        await using var ctx = _fixture.CreateContext();
+        return await new TransferService(ctx, TestAudit.For(ctx), new TestCaller(clientId)).TransferAsync(request);
+    }
+
+    private async Task<decimal> CustomerBalanceAsync(Account customer)
+    {
+        await using var ctx = _fixture.CreateContext();
+        return await ctx.LedgerEntries.Where(e => e.AccountId == customer.Id)
+            .SumAsync(e => e.EntryType == EntryType.Credit ? e.Amount : -e.Amount);
+    }
+
+    [Fact]
+    public async Task TransferAsync_RecordsTheCallingClient_AndARequestHash()
+    {
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+
+        var response = await SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, 100m, "x", "key-1"));
+
+        await using var ctx = _fixture.CreateContext();
+        var transaction = await ctx.Transactions.SingleAsync(t => t.Reference == response.Reference);
+        Assert.Equal("test-client", transaction.InitiatedBy);
+        Assert.False(string.IsNullOrEmpty(transaction.RequestHash));
+    }
+
+    [Theory]
+    [InlineData(900, "x")]      // different amount
+    [InlineData(100, "other")]  // different narration
+    public async Task TransferAsync_Throws409_WhenAKeyIsReusedForADifferentRequest_AndMovesNothing(decimal amount, string narration)
+    {
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+        await SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, 100m, "x", "key-1"));
+
+        await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(() =>
+            SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, amount, narration, "key-1")));
+
+        Assert.Equal(100m, await CustomerBalanceAsync(customer));
+        await using var ctx = _fixture.CreateContext();
+        Assert.Equal(1, await ctx.Transactions.CountAsync());
+    }
+
+    [Fact]
+    public async Task TransferAsync_TreatsEquivalentAmounts_AsTheSameRequest()
+    {
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+
+        var first = await SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, 100m, "x", "key-1"));
+        var retry = await SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, 100.00m, "x", "key-1"));
+
+        Assert.Equal(first.Reference, retry.Reference);
+        Assert.Equal(100m, await CustomerBalanceAsync(customer));
+    }
+
+    [Fact]
+    public async Task TransferAsync_KeepsTheSameKeyFromTwoClients_Separate()
+    {
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+        var request = new TransferRequest(system.AccountNumber, customer.AccountNumber, 100m, "x", "order-42");
+
+        var fromA = await SendAsync(request, "client-a");
+        var fromB = await SendAsync(request, "client-b");
+
+        Assert.NotEqual(fromA.Reference, fromB.Reference);
+        Assert.Equal(200m, await CustomerBalanceAsync(customer));
+    }
+
+    [Fact]
+    public async Task TransferAsync_ConcurrentRequestsWithOneKeyAndDifferentBodies_OneSucceedsOneConflicts()
+    {
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+
+        var attempts = new[] { 100m, 900m }.Select(amount => Task.Run(async () =>
+        {
+            try
+            {
+                await SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, amount, "x", "key-1"));
+                return "ok";
+            }
+            catch (DuplicateIdempotencyKeyException)
+            {
+                return "conflict";
+            }
+        }));
+
+        var results = await Task.WhenAll(attempts);
+
+        Assert.Single(results, r => r == "ok");
+        Assert.Single(results, r => r == "conflict");
+        await using var ctx = _fixture.CreateContext();
+        Assert.Equal(1, await ctx.Transactions.CountAsync());
+    }
+
+    [Fact]
+    public async Task TransferAsync_ReplaysARowWithoutARequestHash()
+    {
+        // Transactions created before request hashes existed have no client and no hash: a retry of their key
+        // still returns the stored result rather than a 409.
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+        await using (var ctx = _fixture.CreateContext())
+        {
+            ctx.Transactions.Add(new Transaction
+            {
+                Reference = "TXN-LEGACY", IdempotencyKey = "legacy-key", Status = TransactionStatus.Success,
+                CreatedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow,
+            });
+            await ctx.SaveChangesAsync();
+        }
+
+        var response = await SendAsync(
+            new TransferRequest(system.AccountNumber, customer.AccountNumber, 555m, "anything", "legacy-key"), clientId: null);
+
+        Assert.Equal("TXN-LEGACY", response.Reference);
+        Assert.Equal(0m, await CustomerBalanceAsync(customer));
     }
 }

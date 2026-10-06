@@ -1,22 +1,27 @@
 using LedgerApi.Auditing;
+using LedgerApi.Authorization;
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Contracts.Responses;
 using LedgerApi.Data;
 using LedgerApi.Entities;
+using LedgerApi.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
-using System.Data.Common;
-using System.Security.Principal;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 
 namespace LedgerApi.Services;
 
-public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger) : ITransferService
+public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger, ICurrentClient currentClient) : ITransferService
 {
     //accept idempotency key from the request(client-supplied)
-    // Attempt to insert transaction envelope with the key, inside transaction table
-    // On unique-constraint violation: fetch and return the stored result for the key no reprocessing
+    // Attempt to insert transaction envelope with the key, the calling client and a hash of the request
+    // On unique-constraint violation for (client, key): same request hash -> return the stored result, no reprocessing;
+    //   different request hash -> 409, the key was already used for a different request
     //lock the row on account debit
     // Fetch destination account no locking
     // check if source account allows debit
@@ -64,8 +69,24 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
             Status = transaction.Status.ToString(),
         });
 
+    // Fingerprint of the fields that define a transfer. JSON keeps the fields unambiguous, and the amount is
+    // normalised so 100 and 100.00 are the same request.
+    private static string HashRequest(TransferRequest request)
+    {
+        var fields = JsonSerializer.Serialize(new[]
+        {
+            request.DebitAccountNumber,
+            request.CreditAccountNumber,
+            request.Amount.ToString("G29", CultureInfo.InvariantCulture),
+            request.Narration ?? "",
+        });
+        return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(fields)));
+    }
+
     public async Task<TransferResponse> TransferAsync(TransferRequest request, CancellationToken cancellationToken = default)
     {
+        var clientId = currentClient.ClientId;
+        var requestHash = HashRequest(request);
 
         await using var dbTransaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
@@ -75,6 +96,8 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
         {
             Reference = TransactionReference.Generate(),
             IdempotencyKey = request.IdempotencyKey,
+            InitiatedBy = clientId,
+            RequestHash = requestHash,
             Status = TransactionStatus.Pending,
             Narration = request.Narration,
             CreatedAt = now
@@ -86,12 +109,20 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" } pgEx)
         {
-            if (pgEx.ConstraintName == "ix_transactions_idempotency_key")
+            if (pgEx.ConstraintName == "ix_transactions_initiated_by_idempotency_key")
             {
-                var dbInsertedTransaction = await dbContext.Transactions.FirstOrDefaultAsync(x => x.IdempotencyKey == request.IdempotencyKey, cancellationToken);
+                var dbInsertedTransaction = await dbContext.Transactions.FirstOrDefaultAsync(
+                    x => x.InitiatedBy == clientId && x.IdempotencyKey == request.IdempotencyKey, cancellationToken);
                 if (dbInsertedTransaction != null)
                 {
                     await RollbackAsync(dbTransaction);
+
+                    // Same key, different request: refuse rather than report the old result as this one's (409).
+                    // Rows from before request hashes were stored (null) are treated as a match.
+                    if (dbInsertedTransaction.RequestHash is not null && dbInsertedTransaction.RequestHash != requestHash)
+                        throw new DuplicateIdempotencyKeyException(
+                            $"Idempotency key '{request.IdempotencyKey}' was already used for a different request.");
+
                     return new TransferResponse(
                         dbInsertedTransaction.Reference,
                         dbInsertedTransaction.Status.ToString(),

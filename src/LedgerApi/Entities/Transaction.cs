@@ -13,4 +13,8 @@ public class Transaction
 
     public ICollection<LedgerEntry> Entries { get; set; } = new List<LedgerEntry>();
     public string? FailureReason { get; set; }
+
+    // SHA-256 of the request's business fields, so a reused idempotency key with a different body is
+    // detected (decision #42). Null for transactions created before it existed and for reversals.
+    public string? RequestHash { get; set; }
 }
