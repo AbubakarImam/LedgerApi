@@ -16,7 +16,8 @@ Content-Type: application/json
 {
   "accountName": "Ada Lovelace",
   "accountType": "Savings",
-  "currencyCode": "NGN"
+  "currencyCode": "NGN",
+  "idempotencyKey": "demo-create-account-1"
 }
 
 ### Create system account (admin)
@@ -27,7 +28,8 @@ Content-Type: application/json
 {
   "accountName": "NGN Fees",
   "accountType": "Wallet",
-  "currencyCode": "NGN"
+  "currencyCode": "NGN",
+  "idempotencyKey": "demo-create-system-account-1"
 }
 
 ### Account enquiry

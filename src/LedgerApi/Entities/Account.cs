@@ -13,4 +13,10 @@ public class Account
     public DateTimeOffset CreatedAt { get; set; }
 
     public ICollection<LedgerEntry> Entries { get; set; } = new List<LedgerEntry>();
+
+    // Idempotency for account creation (mirrors Transaction): null for accounts created before this
+    // existed (seed data) and for keys reused with a matching request.
+    public string? IdempotencyKey { get; set; }
+    public string? InitiatedBy { get; set; }
+    public string? RequestHash { get; set; }
 }

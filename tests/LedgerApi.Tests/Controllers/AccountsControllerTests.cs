@@ -42,7 +42,7 @@ public class AccountsControllerTests
         var controller = CreateController(new StubAccountService(Account, null));
 
         var result = await controller.CreateAccount(
-            new CreateAccountRequest("Ada Lovelace", "Savings", "NGN"), CancellationToken.None);
+            new CreateAccountRequest("Ada Lovelace", "Savings", "NGN", "key-1"), CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(Account, ok.Value);
@@ -55,7 +55,7 @@ public class AccountsControllerTests
         var controller = CreateController(service);
 
         var result = await controller.CreateAccount(
-            new CreateAccountRequest("Ada Lovelace", "Crypto", "NGN"), CancellationToken.None);
+            new CreateAccountRequest("Ada Lovelace", "Crypto", "NGN", "key-2"), CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
         var errors = Assert.IsAssignableFrom<IReadOnlyList<string>>(badRequest.Value);

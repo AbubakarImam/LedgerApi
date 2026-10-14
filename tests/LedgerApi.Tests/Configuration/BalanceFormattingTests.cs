@@ -14,7 +14,7 @@ public class BalanceFormattingTests(ApiFixture fixture)
     {
         using var client = fixture.CreateClient(ApiFixture.OnlyClient(LedgerScopes.Accounts));
         using var response = await client.PostAsJsonAsync("/api/accounts",
-            new { accountName = "Balance Format", accountType = "Wallet", currencyCode = currency });
+            new { accountName = "Balance Format", accountType = "Wallet", currencyCode = currency, idempotencyKey = Guid.NewGuid().ToString() });
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AccountResponse>())!.AccountNumber;
     }

@@ -6,7 +6,7 @@ namespace LedgerApi.Tests.Validation;
 public class CreateAccountRequestValidatorTests
 {
     private static IReadOnlyList<string> Validate(string currencyCode) =>
-        new CreateAccountRequestValidator().Validate(new CreateAccountRequest("Test", "Savings", currencyCode));
+        new CreateAccountRequestValidator().Validate(new CreateAccountRequest("Test", "Savings", currencyCode, "key-1"));
 
     [Theory]
     [InlineData("NGN")]
@@ -38,8 +38,20 @@ public class CreateAccountRequestValidatorTests
     [Fact]
     public void Rejects_NullCurrency()
     {
-        var errors = new CreateAccountRequestValidator().Validate(new CreateAccountRequest("Test", "Savings", null!));
+        var errors = new CreateAccountRequestValidator().Validate(new CreateAccountRequest("Test", "Savings", null!, "key-1"));
 
         Assert.Contains(errors, e => e.Contains("not a supported currency"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Rejects_MissingIdempotencyKey(string? idempotencyKey)
+    {
+        var errors = new CreateAccountRequestValidator().Validate(
+            new CreateAccountRequest("Test", "Savings", "NGN", idempotencyKey!));
+
+        Assert.Contains(errors, e => e.Contains("IdempotencyKey", StringComparison.OrdinalIgnoreCase));
     }
 }

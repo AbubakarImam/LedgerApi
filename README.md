@@ -9,7 +9,7 @@ The design, including every trade-off, is in [docs/DESIGN.md](docs/DESIGN.md). S
 - **Double entry.** Every successful transaction writes exactly one debit and one matching credit, in one database transaction.
 - **Derived balances.** There is no balance column. A balance is `SUM(credits) − SUM(debits)` over an account's entries.
 - **Append-only.** Entries are never updated or deleted. A reversal writes new opposite entries.
-- **Idempotency.** Money-moving requests carry an idempotency key, unique per API client. An exact retry returns the stored result; the same key with a different request gets 409.
+- **Idempotency.** Money-moving requests and account creation carry an idempotency key, unique per API client. An exact retry returns the stored result; the same key with a different request gets 409.
 - **No overdraft under concurrency.** The debited account is locked (`SELECT … FOR UPDATE`) while its balance is checked.
 
 ## Try it live
@@ -28,12 +28,12 @@ Use **Try it out** on each endpoint. Anything in `<angle brackets>` comes from a
 
 1. **Create two accounts.** `POST /api/accounts`, once for each:
    ```json
-   { "accountName": "Ada", "accountType": "Savings", "currencyCode": "NGN" }
+   { "accountName": "Ada", "accountType": "Savings", "currencyCode": "NGN", "idempotencyKey": "<your-name>-account-1" }
    ```
    ```json
-   { "accountName": "Bola", "accountType": "Wallet", "currencyCode": "NGN" }
+   { "accountName": "Bola", "accountType": "Wallet", "currencyCode": "NGN", "idempotencyKey": "<your-name>-account-2" }
    ```
-   Each response has a 10-digit `accountNumber`. Note both.
+   Each response has a 10-digit `accountNumber`. Note both. Use your own `idempotencyKey` values, same as deposits and transfers below: a retried create with the same key and body returns the account it already created, instead of a second one.
 
 2. **Fund the first account.** `POST /api/deposits` moves money in from the ledger's NGN funding account:
    ```json

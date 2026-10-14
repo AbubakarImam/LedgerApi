@@ -18,12 +18,12 @@ public class AuthorizationTests(ApiFixture fixture)
     {
         { "GET", "/api/accounts/1000000001", null, LedgerScopes.Read },
         { "GET", "/api/accounts/1000000001/balance", null, LedgerScopes.Read },
-        { "POST", "/api/accounts", """{"accountName":"Auth Test","accountType":"Savings","currencyCode":"NGN"}""", LedgerScopes.Accounts },
+        { "POST", "/api/accounts", $$"""{"accountName":"Auth Test","accountType":"Savings","currencyCode":"NGN","idempotencyKey":"{{Guid.NewGuid()}}"}""", LedgerScopes.Accounts },
         { "POST", "/api/transfers", $$"""{"debitAccountNumber":"1000000001","creditAccountNumber":"1000000002","amount":10,"idempotencyKey":"{{Guid.NewGuid()}}"}""", LedgerScopes.Transfer },
         { "POST", "/api/deposits", $$"""{"customerAccountNumber":"1000000001","amount":10,"idempotencyKey":"{{Guid.NewGuid()}}"}""", LedgerScopes.Funding },
         { "POST", "/api/withdrawals", $$"""{"customerAccountNumber":"1000000001","amount":10,"idempotencyKey":"{{Guid.NewGuid()}}"}""", LedgerScopes.Funding },
         { "POST", "/api/reversals", """{"originalTransactionReference":"TXN-DOESNOTEXIST"}""", LedgerScopes.Reverse },
-        { "POST", "/api/admin/system-accounts", """{"accountName":"Auth Test System","accountType":"Wallet","currencyCode":"NGN"}""", LedgerScopes.Admin },
+        { "POST", "/api/admin/system-accounts", $$"""{"accountName":"Auth Test System","accountType":"Wallet","currencyCode":"NGN","idempotencyKey":"{{Guid.NewGuid()}}"}""", LedgerScopes.Admin },
     };
 
     private static HttpRequestMessage Request(string method, string path, string? body)
@@ -97,7 +97,7 @@ public class AuthorizationTests(ApiFixture fixture)
         using var client = fixture.CreateClient(clientId);
 
         using var response = await client.PostAsJsonAsync("/api/accounts",
-            new { accountName = "Actor Test", accountType = "Savings", currencyCode = "NGN" });
+            new { accountName = "Actor Test", accountType = "Savings", currencyCode = "NGN", idempotencyKey = Guid.NewGuid().ToString() });
         response.EnsureSuccessStatusCode();
         var account = await response.Content.ReadFromJsonAsync<AccountResponse>();
 
