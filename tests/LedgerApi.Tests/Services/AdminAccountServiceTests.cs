@@ -1,5 +1,6 @@
 using LedgerApi.Contracts.Requests;
 using LedgerApi.Entities;
+using LedgerApi.Exceptions;
 using LedgerApi.Services;
 using LedgerApi.Tests.Fixtures;
 using Microsoft.EntityFrameworkCore;
@@ -22,11 +23,12 @@ public class AdminAccountServiceTests : IAsyncLifetime
     {
         await using var ctx = _fixture.CreateContext();
 
-        var service = new AdminAccountService(ctx, TestAudit.For(ctx));
+        var service = new AdminAccountService(ctx, TestAudit.For(ctx), TestCaller.Default);
         var request = new CreateAccountRequest(
             AccountName: "Test Account",
              AccountType: "Wallet",
-            CurrencyCode: "NGN");
+            CurrencyCode: "NGN",
+            IdempotencyKey: Guid.NewGuid().ToString());
 
         var response = await service.CreateSystemAccountAsync(request);
         Assert.Equal("System",  response.AccountClass);
@@ -38,5 +40,54 @@ public class AdminAccountServiceTests : IAsyncLifetime
         var account = Assert.Single(accounts);
         Assert.Equal(response.AccountNumber, account.AccountNumber);
         Assert.Equal(AccountClass.System, account.AccountClass);
+    }
+
+    [Fact]
+    public async Task AdminAccountAsync_RetriedWithTheSameKeyAndBody_ReturnsTheSameAccount_AndCreatesOnlyOne()
+    {
+        var request = new CreateAccountRequest("Test Account", "Wallet", "NGN", "order-42");
+
+        await using var ctx1 = _fixture.CreateContext();
+        var first = await new AdminAccountService(ctx1, TestAudit.For(ctx1), TestCaller.Default).CreateSystemAccountAsync(request);
+
+        await using var ctx2 = _fixture.CreateContext();
+        var retry = await new AdminAccountService(ctx2, TestAudit.For(ctx2), TestCaller.Default).CreateSystemAccountAsync(request);
+
+        Assert.Equal(first.AccountNumber, retry.AccountNumber);
+
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Equal(1, await verifyCtx.Accounts.CountAsync());
+    }
+
+    [Fact]
+    public async Task AdminAccountAsync_RetryWithDifferentAccountTypeCasing_IsTheSameRequest()
+    {
+        await using var ctx1 = _fixture.CreateContext();
+        var first = await new AdminAccountService(ctx1, TestAudit.For(ctx1), TestCaller.Default)
+            .CreateSystemAccountAsync(new CreateAccountRequest("Test Account", "Wallet", "NGN", "order-42"));
+
+        await using var ctx2 = _fixture.CreateContext();
+        var retry = await new AdminAccountService(ctx2, TestAudit.For(ctx2), TestCaller.Default)
+            .CreateSystemAccountAsync(new CreateAccountRequest("Test Account", "WALLET", "NGN", "order-42"));
+
+        Assert.Equal(first.AccountNumber, retry.AccountNumber);
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Equal(1, await verifyCtx.Accounts.CountAsync());
+    }
+
+    [Fact]
+    public async Task AdminAccountAsync_ReusedKeyForADifferentRequest_Throws409_AndCreatesOnlyOne()
+    {
+        await using var ctx1 = _fixture.CreateContext();
+        await new AdminAccountService(ctx1, TestAudit.For(ctx1), TestCaller.Default)
+            .CreateSystemAccountAsync(new CreateAccountRequest("Test Account", "Wallet", "NGN", "order-42"));
+
+        await using var ctx2 = _fixture.CreateContext();
+        await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(() =>
+            new AdminAccountService(ctx2, TestAudit.For(ctx2), TestCaller.Default)
+                .CreateSystemAccountAsync(new CreateAccountRequest("Different Account", "Wallet", "NGN", "order-42")));
+
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Equal(1, await verifyCtx.Accounts.CountAsync());
     }
 }

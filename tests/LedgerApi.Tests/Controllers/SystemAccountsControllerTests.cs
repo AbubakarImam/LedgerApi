@@ -35,7 +35,7 @@ public class SystemAccountsControllerTests
     {
         var service = new StubAdminAccountService(Account);
         var controller = CreateController(service);
-        var request = new CreateAccountRequest("NGN Fees", "Wallet", "NGN");
+        var request = new CreateAccountRequest("NGN Fees", "Wallet", "NGN", "key-1");
 
         var result = await controller.CreateSystemAccount(request, CancellationToken.None);
 
@@ -51,7 +51,7 @@ public class SystemAccountsControllerTests
         var controller = CreateController(service);
 
         var result = await controller.CreateSystemAccount(
-            new CreateAccountRequest("NGN Fees", "Crypto", "NGN"), CancellationToken.None);
+            new CreateAccountRequest("NGN Fees", "Crypto", "NGN", "key-2"), CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
         var errors = Assert.IsAssignableFrom<IReadOnlyList<string>>(badRequest.Value);

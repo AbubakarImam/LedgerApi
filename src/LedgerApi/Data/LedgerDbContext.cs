@@ -17,6 +17,11 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
         {
             entity.HasKey(a => a.Id);
             entity.HasIndex(a => a.AccountNumber).IsUnique();
+            // Keys are scoped to the calling client, same as transactions (decision #42). Partial: accounts created
+            // before decision #43 (including the seeded funding accounts) have no key and are left out, since with
+            // nulls not distinct they would all collide as (null, null). Every new account has a key.
+            entity.HasIndex(a => new { a.InitiatedBy, a.IdempotencyKey }).IsUnique().AreNullsDistinct(false)
+                .HasFilter("\"idempotency_key\" IS NOT NULL");
             entity.Property(a => a.AccountType).HasConversion<string>();
             entity.Property(a => a.AccountClass).HasConversion<string>();
             entity.Property(a => a.Status).HasConversion<string>();

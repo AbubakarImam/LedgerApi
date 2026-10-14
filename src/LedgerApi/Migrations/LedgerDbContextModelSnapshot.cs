@@ -60,6 +60,18 @@ namespace LedgerApi.Migrations
                         .HasColumnType("text")
                         .HasColumnName("currency_code");
 
+                    b.Property<string>("IdempotencyKey")
+                        .HasColumnType("text")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<string>("InitiatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("initiated_by");
+
+                    b.Property<string>("RequestHash")
+                        .HasColumnType("text")
+                        .HasColumnName("request_hash");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text")
@@ -75,6 +87,13 @@ namespace LedgerApi.Migrations
                     b.HasIndex("AccountNumber")
                         .IsUnique()
                         .HasDatabaseName("ix_accounts_account_number");
+
+                    b.HasIndex("InitiatedBy", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_accounts_initiated_by_idempotency_key")
+                        .HasFilter("\"idempotency_key\" IS NOT NULL");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("InitiatedBy", "IdempotencyKey"), false);
 
                     b.ToTable("accounts", null, t =>
                         {
