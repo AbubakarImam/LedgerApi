@@ -288,6 +288,10 @@ namespace LedgerApi.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("ChainId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("chain_id");
+
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("completed_at");
@@ -295,6 +299,93 @@ namespace LedgerApi.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<string>("FailureReason")
+                        .HasColumnType("text")
+                        .HasColumnName("failure_reason");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<string>("InitiatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("initiated_by");
+
+                    b.Property<string>("Narration")
+                        .HasColumnType("text")
+                        .HasColumnName("narration");
+
+                    b.Property<string>("Purpose")
+                        .HasColumnType("text")
+                        .HasColumnName("purpose");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("reference");
+
+                    b.Property<string>("RequestHash")
+                        .HasColumnType("text")
+                        .HasColumnName("request_hash");
+
+                    b.Property<int?>("Sequence")
+                        .HasColumnType("integer")
+                        .HasColumnName("sequence");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_transactions");
+
+                    b.HasIndex("Reference")
+                        .IsUnique()
+                        .HasDatabaseName("ix_transactions_reference");
+
+                    b.HasIndex("ChainId", "Sequence")
+                        .IsUnique()
+                        .HasDatabaseName("ix_transactions_chain_id_sequence");
+
+                    b.HasIndex("InitiatedBy", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_transactions_initiated_by_idempotency_key");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("InitiatedBy", "IdempotencyKey"), false);
+
+                    b.ToTable("transactions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_transactions_chain_leg", "(\"chain_id\" IS NULL AND \"sequence\" IS NULL AND \"purpose\" IS NULL) OR (\"chain_id\" IS NOT NULL AND \"sequence\" >= 1 AND \"purpose\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_transactions_purpose", "\"purpose\" IN ('Principal', 'Fee', 'Tax')");
+
+                            t.HasCheckConstraint("ck_transactions_status", "\"status\" IN ('Pending', 'Success', 'Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("LedgerApi.Entities.TransactionChain", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int?>("FailedSequence")
+                        .HasColumnType("integer")
+                        .HasColumnName("failed_sequence");
 
                     b.Property<string>("FailureReason")
                         .HasColumnType("text")
@@ -322,27 +413,35 @@ namespace LedgerApi.Migrations
                         .HasColumnType("text")
                         .HasColumnName("request_hash");
 
+                    b.Property<long?>("ReversesChainId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("reverses_chain_id");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("status");
 
                     b.HasKey("Id")
-                        .HasName("pk_transactions");
+                        .HasName("pk_transaction_chains");
 
                     b.HasIndex("Reference")
                         .IsUnique()
-                        .HasDatabaseName("ix_transactions_reference");
+                        .HasDatabaseName("ix_transaction_chains_reference");
+
+                    b.HasIndex("ReversesChainId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_transaction_chains_reverses_chain_id");
 
                     b.HasIndex("InitiatedBy", "IdempotencyKey")
                         .IsUnique()
-                        .HasDatabaseName("ix_transactions_initiated_by_idempotency_key");
+                        .HasDatabaseName("ix_transaction_chains_initiated_by_idempotency_key");
 
                     NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("InitiatedBy", "IdempotencyKey"), false);
 
-                    b.ToTable("transactions", null, t =>
+                    b.ToTable("transaction_chains", null, t =>
                         {
-                            t.HasCheckConstraint("ck_transactions_status", "\"status\" IN ('Pending', 'Success', 'Failed')");
+                            t.HasCheckConstraint("ck_transaction_chains_status", "\"status\" IN ('Pending', 'Success', 'Failed')");
                         });
                 });
 
@@ -388,6 +487,28 @@ namespace LedgerApi.Migrations
                     b.Navigation("ReversalTransaction");
                 });
 
+            modelBuilder.Entity("LedgerApi.Entities.Transaction", b =>
+                {
+                    b.HasOne("LedgerApi.Entities.TransactionChain", "Chain")
+                        .WithMany("Legs")
+                        .HasForeignKey("ChainId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_transactions_transaction_chains_chain_id");
+
+                    b.Navigation("Chain");
+                });
+
+            modelBuilder.Entity("LedgerApi.Entities.TransactionChain", b =>
+                {
+                    b.HasOne("LedgerApi.Entities.TransactionChain", "ReversesChain")
+                        .WithMany()
+                        .HasForeignKey("ReversesChainId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_transaction_chains_transaction_chains_reverses_chain_id");
+
+                    b.Navigation("ReversesChain");
+                });
+
             modelBuilder.Entity("LedgerApi.Entities.Account", b =>
                 {
                     b.Navigation("Entries");
@@ -396,6 +517,11 @@ namespace LedgerApi.Migrations
             modelBuilder.Entity("LedgerApi.Entities.Transaction", b =>
                 {
                     b.Navigation("Entries");
+                });
+
+            modelBuilder.Entity("LedgerApi.Entities.TransactionChain", b =>
+                {
+                    b.Navigation("Legs");
                 });
 #pragma warning restore 612, 618
         }

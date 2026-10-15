@@ -43,7 +43,7 @@ public class PostgresFixture : IAsyncLifetime
     {
         await using var context = CreateContext();
         await context.Database.ExecuteSqlRawAsync(
-           "TRUNCATE TABLE accounts, audit_logs, transactions, ledger_entries, reversals RESTART IDENTITY CASCADE");
+           "TRUNCATE TABLE accounts, audit_logs, transaction_chains, transactions, ledger_entries, reversals RESTART IDENTITY CASCADE");
     }
 }
 
