@@ -16,9 +16,9 @@ public class TransferRequestValidator
             errors.Add("Credit account number is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        if (IdempotencyKeyRule.Validate(request.IdempotencyKey) is { } error)
         {
-            errors.Add("IdempotencyKey is required.");
+            errors.Add(error);
         }
 
         if (request.DebitAccountNumber == request.CreditAccountNumber)
