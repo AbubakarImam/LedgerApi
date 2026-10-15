@@ -6,6 +6,7 @@ using LedgerApi.Services;
 using LedgerApi.Validation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace LedgerApi.Controllers;
 
@@ -43,5 +44,17 @@ public class ChainsController(
     {
         var chain = await chainService.GetAsync(reference, cancellationToken);
         return chain is null ? NotFound() : Ok(chain);
+    }
+
+    // Reverses every leg, last first, in one database transaction (decision #45). The body is optional.
+    [Authorize(Policy = LedgerScopes.Reverse)]
+    [HttpPost("{reference}/reversals")]
+    public async Task<ActionResult<ChainResponse>> Reverse(
+        string reference,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ChainReversalRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var reversal = await chainService.ReverseAsync(reference, request?.Reason, cancellationToken);
+        return Ok(reversal);
     }
 }

@@ -60,6 +60,15 @@ public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger
             .SingleOrDefaultAsync(t => t.Reference == request.OriginalTransactionReference, cancellationToken)
             ?? throw new TransactionNotFoundException($"Transaction '{request.OriginalTransactionReference}' was not found.");
 
+        //Check Original is not a chain leg: a chain is reversed as a whole (decision #45)
+        if (original.ChainId is { } chainId)
+        {
+            var chainReference = await dbContext.TransactionChains
+                .Where(c => c.Id == chainId).Select(c => c.Reference).SingleAsync(cancellationToken);
+            throw new TransactionNotReversibleException(
+                $"Transaction '{original.Reference}' is part of chain '{chainReference}'; reverse the chain.");
+        }
+
         //Check Original transaction status
         if (original.Status != TransactionStatus.Success)
             throw new TransactionNotReversibleException(

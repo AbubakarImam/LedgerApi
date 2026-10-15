@@ -277,4 +277,120 @@ public class ChainServiceTests : IAsyncLifetime
         Assert.Equal(posted.Legs.Select(l => (l.Sequence, l.Reference, l.Amount)), chain!.Legs.Select(l => (l.Sequence, l.Reference, l.Amount)));
         Assert.Null(await service.GetAsync("CHN-DOESNOTEXIST"));
     }
+
+    // ---- Reversal ----
+
+    private async Task<ChainResponse> ReverseAsync(string reference, string? reason = null)
+    {
+        await using var ctx = _fixture.CreateContext();
+        return await new ChainService(ctx, TestAudit.For(ctx), TestCaller.Default).ReverseAsync(reference, reason);
+    }
+
+    private async Task<ChainResponse> PostThreeLegChainAsync()
+    {
+        await SeedAsync();
+        await FundAsync(A, 1000m);
+        var chain = await PostAsync("to-reverse", Leg(A, B, 500m), Leg(A, Fees, 10m, "Fee"), Leg(A, Tax, 2m, "Tax"));
+        Assert.Equal("Success", chain.Status);
+        return chain;
+    }
+
+    [Fact]
+    public async Task ChainReversal_RestoresAllBalances_InTaxFeePrincipalOrder()
+    {
+        var chain = await PostThreeLegChainAsync();
+
+        var reversal = await ReverseAsync(chain.Reference, "Customer dispute");
+
+        Assert.Equal("Success", reversal.Status);
+        Assert.Equal(chain.Reference, reversal.ReversesChainReference);
+        Assert.Equal(new[] { (1, "Tax"), (2, "Fee"), (3, "Principal") }, reversal.Legs.Select(l => (l.Sequence, l.Purpose)));
+        Assert.Equal((B, A, 500.00m), (reversal.Legs[2].DebitAccountNumber, reversal.Legs[2].CreditAccountNumber, reversal.Legs[2].Amount));
+        Assert.Equal(1000m, await BalanceAsync(A));
+        Assert.Equal(0m, await BalanceAsync(B));
+        Assert.Equal(0m, await BalanceAsync(Fees));
+        Assert.Equal(0m, await BalanceAsync(Tax));
+
+        await using var ctx = _fixture.CreateContext();
+        Assert.Equal(3, await ctx.Reversals.CountAsync()); // one reversals row per leg: each leg is reversed at most once
+        var original = await new ChainService(ctx, TestAudit.For(ctx), TestCaller.Default).GetAsync(chain.Reference);
+        Assert.Equal(reversal.Reference, original!.ReversedByChainReference);
+    }
+
+    [Fact]
+    public async Task ChainReversal_ASecondTime_IsRefused()
+    {
+        var chain = await PostThreeLegChainAsync();
+        await ReverseAsync(chain.Reference);
+
+        await Assert.ThrowsAsync<AlreadyReversedException>(() => ReverseAsync(chain.Reference));
+
+        Assert.Equal(1000m, await BalanceAsync(A));
+    }
+
+    [Fact]
+    public async Task ChainReversal_WhenOneLegCannotBeReversed_RollsBackTheWholeReversal()
+    {
+        // B spent the principal, so its reversing leg (the last one) fails after Tax and Fee were reversed.
+        var chain = await PostThreeLegChainAsync();
+        await FundAsync(C, 0.01m); // C exists with money; B pays C most of what it received
+        await using (var ctx = _fixture.CreateContext())
+        {
+            var response = await new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default)
+                .TransferAsync(new TransferRequest(B, C, 400m, "spend", Guid.NewGuid().ToString()));
+            Assert.Equal("Success", response.Status);
+        }
+
+        await Assert.ThrowsAsync<InsufficientFundsException>(() => ReverseAsync(chain.Reference));
+
+        Assert.Equal(488m, await BalanceAsync(A));
+        Assert.Equal(10m, await BalanceAsync(Fees));
+        Assert.Equal(2m, await BalanceAsync(Tax));
+        await using var verify = _fixture.CreateContext();
+        Assert.Equal(0, await verify.Reversals.CountAsync());
+        Assert.Equal(1, await verify.TransactionChains.CountAsync()); // no reversal chain stored
+    }
+
+    [Fact]
+    public async Task ChainReversal_MayDebitAFrozenAccount()
+    {
+        // Decision #38: money can be clawed back from a frozen account.
+        var chain = await PostThreeLegChainAsync();
+        await using (var ctx = _fixture.CreateContext())
+        {
+            await ctx.Accounts.Where(a => a.AccountNumber == B)
+                .ExecuteUpdateAsync(u => u.SetProperty(a => a.Status, AccountStatus.Frozen));
+        }
+
+        var reversal = await ReverseAsync(chain.Reference);
+
+        Assert.Equal("Success", reversal.Status);
+        Assert.Equal(0m, await BalanceAsync(B));
+    }
+
+    [Fact]
+    public async Task ReversingAFailedChain_OrAReversal_IsRefused()
+    {
+        var chain = await PostThreeLegChainAsync();
+        var reversal = await ReverseAsync(chain.Reference);
+        var failed = await PostAsync("failed", Leg(C, B, 100m)); // C has no money
+
+        await Assert.ThrowsAsync<TransactionNotReversibleException>(() => ReverseAsync(failed.Reference));
+        await Assert.ThrowsAsync<TransactionNotReversibleException>(() => ReverseAsync(reversal.Reference));
+        await Assert.ThrowsAsync<ChainNotFoundException>(() => ReverseAsync("CHN-DOESNOTEXIST"));
+    }
+
+    [Fact]
+    public async Task ASingleLeg_ReversedThroughTheOldEndpoint_Is422_PointingAtTheChain()
+    {
+        var chain = await PostThreeLegChainAsync();
+
+        await using var ctx = _fixture.CreateContext();
+        var ex = await Assert.ThrowsAsync<TransactionNotReversibleException>(() =>
+            new ReversalService(ctx, TestAudit.For(ctx), TestCaller.Default)
+                .ReverseAsync(new ReversalRequest(chain.Legs[1].Reference, null)));
+
+        Assert.Contains($"is part of chain '{chain.Reference}'; reverse the chain", ex.Message);
+        Assert.Equal(488m, await BalanceAsync(A));
+    }
 }
