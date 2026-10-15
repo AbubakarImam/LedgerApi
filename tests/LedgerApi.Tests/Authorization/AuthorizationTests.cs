@@ -23,6 +23,9 @@ public class AuthorizationTests(ApiFixture fixture)
         { "POST", "/api/deposits", $$"""{"customerAccountNumber":"1000000001","amount":10,"idempotencyKey":"{{Guid.NewGuid()}}"}""", LedgerScopes.Funding },
         { "POST", "/api/withdrawals", $$"""{"customerAccountNumber":"1000000001","amount":10,"idempotencyKey":"{{Guid.NewGuid()}}"}""", LedgerScopes.Funding },
         { "POST", "/api/reversals", """{"originalTransactionReference":"TXN-DOESNOTEXIST"}""", LedgerScopes.Reverse },
+        { "POST", "/api/chains", $$"""{"idempotencyKey":"{{Guid.NewGuid()}}","legs":[{"debitAccountNumber":"9000000001","creditAccountNumber":"9000000002","amount":10,"purpose":"Principal"}]}""", LedgerScopes.Transfer },
+        { "GET", "/api/chains/CHN-DOESNOTEXIST", null, LedgerScopes.Read },
+        { "POST", "/api/chains/CHN-DOESNOTEXIST/reversals", null, LedgerScopes.Reverse },
         { "POST", "/api/admin/system-accounts", $$"""{"accountName":"Auth Test System","accountType":"Wallet","currencyCode":"NGN","idempotencyKey":"{{Guid.NewGuid()}}"}""", LedgerScopes.Admin },
     };
 
