@@ -51,4 +51,28 @@ public class IdempotencyKeyRuleTests
     }
 
     private static bool IsKeyError(string error) => error.StartsWith("IdempotencyKey must be");
+
+    [Theory]
+    [InlineData("chain:1:1")]
+    [InlineData("CHAIN:anything")]
+    public void Rejects_TheReservedChainPrefix(string key) =>
+        Assert.Contains("reserved for chain legs", IdempotencyKeyRule.Validate(key));
+
+    [Fact]
+    public void Allows_ChainElsewhereInTheKey() => Assert.Null(IdempotencyKeyRule.Validate("order-chain:1"));
+
+    // The four existing endpoints (decision #45) and the chains endpoint itself.
+    [Fact]
+    public void EveryValidatorWithAKey_RejectsTheChainPrefix()
+    {
+        const string key = "chain:7:1";
+        static bool IsReserved(string error) => error.Contains("reserved for chain legs");
+
+        Assert.Contains(new TransferRequestValidator().Validate(new TransferRequest("1", "2", 10m, null, key)), IsReserved);
+        Assert.Contains(new DepositRequestValidator().Validate(new DepositRequest("1", 10m, null, key)), IsReserved);
+        Assert.Contains(new WithdrawalRequestValidator().Validate(new WithdrawalRequest("1", 10m, null, key)), IsReserved);
+        Assert.Contains(new CreateAccountRequestValidator().Validate(new CreateAccountRequest("Ada", "Savings", "NGN", key)), IsReserved);
+        Assert.Contains(new ChainRequestValidator().Validate(
+            new ChainRequest(key, null, [new ChainLegRequest("1", "2", 10m, "Principal")])), IsReserved);
+    }
 }
