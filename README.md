@@ -117,6 +117,31 @@ Service tests run against a real PostgreSQL container started by [Testcontainers
 | `POST` | `/api/withdrawals` | Mock withdrawal: customer → funding account |
 | `POST` | `/api/reversals` | Reverse a successful transaction |
 | `POST` | `/api/admin/system-accounts` | Create a system account (`NGN` + 9 digits) |
+| `POST` | `/api/chains` | Post a chain of legs (e.g. principal + fee + tax) in one database transaction |
+| `GET` | `/api/chains/{reference}` | A chain and its legs |
+| `POST` | `/api/chains/{reference}/reversals` | Reverse every leg of a chain, last leg first |
+
+### Chains
+
+A chain posts a payment and its fee and tax together: every leg commits in one database transaction, or none does. Each leg is an ordinary transfer (one debit, one credit); a chain of one leg behaves exactly like `POST /api/transfers`.
+
+```json
+{
+  "idempotencyKey": "order-42",
+  "narration": "Rent",
+  "legs": [
+    { "debitAccountNumber": "<payer>", "creditAccountNumber": "<payee>", "amount": 1500, "purpose": "Principal" },
+    { "debitAccountNumber": "<payer>", "creditAccountNumber": "<fee system account>", "amount": 15, "purpose": "Fee" },
+    { "debitAccountNumber": "<payer>", "creditAccountNumber": "<tax system account>", "amount": 1.13, "purpose": "Tax" }
+  ]
+}
+```
+
+- 1-10 legs; the first is the only `Principal`; `Fee` and `Tax` legs must credit a system account; all legs in one currency.
+- The payer must already afford its total across all legs (here 1,516.13); money it receives earlier in the same chain does not count.
+- A rejected chain is stored as `Failed` with `failedSequence` (which leg) and returns **422**; nothing is posted. The same key with the same legs returns the stored chain; with different legs, **409**.
+- `POST /api/chains/{reference}/reversals` reverses every leg, last first. A single leg cannot be reversed on its own (**422**).
+- Idempotency keys may not start with `chain:` (reserved for chain legs).
 
 ### Status codes
 
@@ -127,7 +152,7 @@ Service tests run against a real PostgreSQL container started by [Testcontainers
 | `401` | Missing or unknown API key |
 | `403` | The API key lacks the endpoint's scope |
 | `404` | Account or transaction not found |
-| `409` | Transaction already reversed, or an idempotency key reused with a different request |
+| `409` | Transaction or chain already reversed, or an idempotency key reused with a different request |
 | `422` | A business rule failed: insufficient funds, account status, currency mismatch, or a transaction that can't be reversed. For transfers, deposits and withdrawals the failure is committed and the body carries `reference`, `status: "Failed"` and `failureReason`. A retry with the same idempotency key returns the same 422. |
 | `500` | Unexpected error. Retry with the **same** idempotency key to learn whether money moved. |
 
@@ -146,11 +171,11 @@ The ledger authenticates **calling services**, not customers (DESIGN.md decision
 
 | Scope | Endpoints |
 |---|---|
-| `ledger.read` | `GET /api/accounts/{n}`, `GET /api/accounts/{n}/balance` |
+| `ledger.read` | `GET /api/accounts/{n}`, `GET /api/accounts/{n}/balance`, `GET /api/chains/{reference}` |
 | `ledger.accounts` | `POST /api/accounts` |
-| `ledger.transfer` | `POST /api/transfers` |
+| `ledger.transfer` | `POST /api/transfers`, `POST /api/chains` |
 | `ledger.funding` | `POST /api/deposits`, `POST /api/withdrawals` |
-| `ledger.reverse` | `POST /api/reversals` |
+| `ledger.reverse` | `POST /api/reversals`, `POST /api/chains/{reference}/reversals` |
 | `ledger.admin` | `POST /api/admin/system-accounts` |
 
 A missing or unknown key gets **401**; a valid key without the endpoint's scope gets **403**.
