@@ -842,10 +842,12 @@ public class TransferServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TransferAsync_ReplaysARowWithoutARequestHash()
+    public async Task TransferAsync_DoesNotReplay_AnOldRowWhoseClientIsUnknown()
     {
-        // Transactions created before request hashes existed have no client and no hash: a retry of their key
-        // still returns the stored result rather than a 409.
+        // Documents a known limitation (decision #44): a transaction from before decision #42 whose client
+        // could not be recovered from the audit trail keeps initiated_by = NULL, so an authenticated retry of
+        // its key does not match it and creates a new transaction. Rows whose client was recovered are
+        // replayed normally (see BackfillMigrationTests).
         var (system, customer) = await SeedIdempotencyAccountsAsync();
         await using (var ctx = _fixture.CreateContext())
         {
@@ -858,9 +860,8 @@ public class TransferServiceTests : IAsyncLifetime
         }
 
         var response = await SendAsync(
-            new TransferRequest(system.AccountNumber, customer.AccountNumber, 555m, "anything", "legacy-key"), clientId: null);
+            new TransferRequest(system.AccountNumber, customer.AccountNumber, 555m, "anything", "legacy-key"), clientId: "payment-api");
 
-        Assert.Equal("TXN-LEGACY", response.Reference);
-        Assert.Equal(0m, await CustomerBalanceAsync(customer));
+        Assert.NotEqual("TXN-LEGACY", response.Reference);
     }
 }
