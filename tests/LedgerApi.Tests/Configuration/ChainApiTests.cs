@@ -76,6 +76,8 @@ public class ChainApiTests(ApiFixture fixture)
         using (var again = await client.PostAsync($"/api/chains/{reference}/reversals", content: null))
         {
             Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+            using var problem = JsonDocument.Parse(await again.Content.ReadAsStringAsync());
+            Assert.Equal("Chain has already been reversed.", problem.RootElement.GetProperty("title").GetString());
         }
     }
 
@@ -127,5 +129,31 @@ public class ChainApiTests(ApiFixture fixture)
             new { customerAccountNumber = "1", amount = 10, idempotencyKey = key }));
         Assert.Equal(HttpStatusCode.BadRequest, await PostAsync("/api/accounts",
             new { accountName = "Ada", accountType = "Savings", currencyCode = "NGN", idempotencyKey = key }));
+    }
+
+    [Fact]
+    public async Task ReversingAFailedChain_Returns422_WithAChainTitle()
+    {
+        using var client = Client();
+        var payer = await CreateCustomerAsync(client); // no money: the chain fails
+        var (_, failed) = await PostChainAsync(client, Guid.NewGuid().ToString(), Leg(payer, NgnFunding, 10m, "Principal"));
+
+        using var response = await client.PostAsync($"/api/chains/{failed.GetProperty("reference").GetString()}/reversals", content: null);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Chain cannot be reversed.", problem.RootElement.GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task SingleTransactionReversal_KeepsItsTransactionTitle()
+    {
+        // The chain titles must not leak into single reversals.
+        using var client = fixture.CreateClient(ApiFixture.OnlyClient(LedgerScopes.Reverse));
+
+        using var response = await client.PostAsJsonAsync("/api/reversals", new { originalTransactionReference = "TXN-DOESNOTEXIST" });
+
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Transaction not found.", problem.RootElement.GetProperty("title").GetString());
     }
 }

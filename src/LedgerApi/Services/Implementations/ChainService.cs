@@ -158,10 +158,10 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             ?? throw new ChainNotFoundException($"Chain '{reference}' was not found.");
 
         if (original.Status != TransactionStatus.Success)
-            throw new TransactionNotReversibleException(
+            throw new ChainNotReversibleException(
                 $"Only successful chains can be reversed; '{original.Reference}' is {original.Status}.");
         if (original.ReversesChainId is not null)
-            throw new TransactionNotReversibleException(
+            throw new ChainNotReversibleException(
                 $"'{original.Reference}' is itself a reversal and cannot be reversed.");
 
         //Insert the reversal chain first: the unique reverses_chain_id refuses a second reversal before any work
@@ -187,7 +187,7 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: ReversesChainIndex
         })
         {
-            throw new AlreadyReversedException($"Chain '{original.Reference}' has already been reversed.", ex);
+            throw new ChainAlreadyReversedException($"Chain '{original.Reference}' has already been reversed.", ex);
         }
 
         //Lock the accounts the reversing legs debit (each original leg's credit side), once each, ascending order
