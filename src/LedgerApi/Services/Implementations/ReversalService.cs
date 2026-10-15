@@ -12,8 +12,7 @@ namespace LedgerApi.Services;
 
 public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger, ICurrentClient currentClient) : IReversalService
 {
-    // Decision #14: a system account may go negative, but never below this floor.
-    private const decimal SystemAccountOverdraftFloor = -1_000_000_000_000m;
+    private readonly LegReverser legReverser = new(dbContext, auditLogger);
 
     // accept the original transaction reference from the request
     // open one db transaction so everything commits together or not at all
@@ -87,106 +86,8 @@ public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger
             CreatedAt = now,
         };
 
-        dbContext.Reversals.Add(new Reversal
-        {
-            OriginalTransaction = original,
-            ReversalTransaction = reversalTransaction,
-            Reason = request.Reason,
-            CreatedAt = now,
-        });
-
-        try
-        {
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
-        {
-            SqlState: PostgresErrorCodes.UniqueViolation,
-            ConstraintName: "ix_reversals_original_transaction_id"
-        })
-        {
-            throw new AlreadyReversedException($"Transaction '{original.Reference}' has already been reversed.", ex);
-        }
-
-        //Locking Account being debited (original credit side)
-        var debitAccountId = original.Entries.Single(e => e.EntryType == EntryType.Credit).AccountId;
-        var debitAccount = await dbContext.Accounts.FromSqlInterpolated($"""
-            SELECT * FROM "accounts" WHERE "id" = {debitAccountId}
-            FOR UPDATE
-            """).SingleAsync(cancellationToken);
-
-        //Getting Account being credited (original debit side), no lock (decision #18)
-        var creditAccountId = original.Entries.Single(e => e.EntryType == EntryType.Debit).AccountId;
-        var creditAccount = await dbContext.Accounts.SingleAsync(a => a.Id == creditAccountId, cancellationToken);
-
-        //Reversal moves the original amount back (both original entries carry the same amount)
-        var amount = original.Entries.First().Amount;
-
-        //Check Debit account status: a Frozen account can be debited by a reversal, so money can be
-        //clawed back from it (decision #38); a Blocked account cannot be debited at all.
-        if (debitAccount.Status == AccountStatus.Blocked)
-            throw new InvalidAccountStatusException(
-                $"Account '{debitAccount.AccountNumber}' is Blocked and cannot be debited.");
-
-        //Check Credit account status
-        if (creditAccount.Status == AccountStatus.Blocked)
-            throw new InvalidAccountStatusException(
-                $"Account '{creditAccount.AccountNumber}' is Blocked and cannot be credited.");
-
-        //Derive Debit account balance
-        var balance = await dbContext.LedgerEntries
-            .Where(x => x.AccountId == debitAccount.Id)
-            .SumAsync(x => x.EntryType == EntryType.Credit ? x.Amount : -x.Amount, cancellationToken);
-
-        //Check Sufficient funds
-        var floor = debitAccount.AccountClass == AccountClass.System ? SystemAccountOverdraftFloor : 0m;
-        if (balance - amount < floor)
-            throw new InsufficientFundsException(
-                $"Account '{debitAccount.AccountNumber}' has insufficient funds to reverse '{original.Reference}'.");
-
-        //Append Debit Entry (the account the original credited)
-        var debitEntry = new LedgerEntry
-        {
-            AccountId = debitAccount.Id,
-            EntryType = EntryType.Debit,
-            Amount = amount,
-            Currency = debitAccount.CurrencyCode,
-            CreatedAt = now,
-            Transaction = reversalTransaction,
-            Account = debitAccount
-        };
-        await dbContext.LedgerEntries.AddAsync(debitEntry, cancellationToken);
-
-        //Append Credit Entry (the account the original debited)
-        var creditEntry = new LedgerEntry
-        {
-            AccountId = creditAccount.Id,
-            EntryType = EntryType.Credit,
-            Amount = amount,
-            Currency = creditAccount.CurrencyCode,
-            CreatedAt = now,
-            Transaction = reversalTransaction,
-            Account = creditAccount
-        };
-        await dbContext.LedgerEntries.AddAsync(creditEntry, cancellationToken);
-
-        //Mark Reversal envelope success (commit happens in ReverseAsync)
-        reversalTransaction.Status = TransactionStatus.Success;
-        reversalTransaction.CompletedAt = DateTimeOffset.UtcNow;
-
-        //Record Audit, committed with the entries and the reversals row
-        auditLogger.Record(new AuditLog
-        {
-            Action = AuditActions.Reversal,
-            EntityType = nameof(Transaction),
-            EntityId = reversalTransaction.Reference,
-            DebitAccountNumber = debitAccount.AccountNumber,
-            CreditAccountNumber = creditAccount.AccountNumber,
-            Amount = amount,
-            Currency = debitAccount.CurrencyCode,
-            Status = reversalTransaction.Status.ToString(),
-        });
-        await dbContext.SaveChangesAsync(cancellationToken);
+        // The reversal rules live in LegReverser, shared with chain reversals (decision #45).
+        await legReverser.ReverseLegAsync(original, reversalTransaction, request.Reason, now, cancellationToken);
 
         return new TransactionResponse(
             reversalTransaction.Reference,
