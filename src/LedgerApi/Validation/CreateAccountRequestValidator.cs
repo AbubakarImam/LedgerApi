@@ -20,9 +20,9 @@ public class CreateAccountRequestValidator
                 $"Supported: {string.Join(", ", SupportedCurrencies.DecimalPlaces.Keys)}.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        if (IdempotencyKeyRule.Validate(request.IdempotencyKey) is { } error)
         {
-            errors.Add("IdempotencyKey is required.");
+            errors.Add(error);
         }
 
         return errors;

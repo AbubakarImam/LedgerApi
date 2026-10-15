@@ -13,10 +13,15 @@ public class PostgresFixture : IAsyncLifetime
     PostgreSqlBuilder("postgres:16-alpine")
     .Build();
 
-    public LedgerDbContext CreateContext()
+    // database: another database in the same container, for tests that need their own schema state
+    // (e.g. migration tests). Null means the shared, fully migrated test database.
+    public LedgerDbContext CreateContext(string? database = null)
     {
+        var connectionString = database is null
+            ? _container.GetConnectionString()
+            : new NpgsqlConnectionStringBuilder(_container.GetConnectionString()) { Database = database }.ConnectionString;
         var options = new DbContextOptionsBuilder<LedgerDbContext>()
-            .UseNpgsql(_container.GetConnectionString())
+            .UseNpgsql(connectionString)
             .UseSnakeCaseNamingConvention()
             .Options;
         return new LedgerDbContext(options);

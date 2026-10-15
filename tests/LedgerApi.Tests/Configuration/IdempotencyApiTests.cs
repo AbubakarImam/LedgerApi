@@ -56,4 +56,16 @@ public class IdempotencyApiTests(ApiFixture fixture)
 
         Assert.NotEqual(fromA.GetProperty("reference").GetString(), fromB.GetProperty("reference").GetString());
     }
+
+    [Fact]
+    public async Task OverlongKey_Returns400_NotA500()
+    {
+        // Longer than Postgres can index (~2.7 KB): without the format rule this reached the database and
+        // failed with an unhandled 500.
+        using var client = fixture.CreateClient(ApiFixture.OnlyClient(LedgerScopes.Transfer));
+
+        var (status, _) = await PostAsync(client, Transfer(new string('k', 3000), 10m));
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+    }
 }
