@@ -775,19 +775,66 @@ public class TransferServiceTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData(900, "x")]      // different amount
-    [InlineData(100, "other")]  // different narration
-    public async Task TransferAsync_Throws409_WhenAKeyIsReusedForADifferentRequest_AndMovesNothing(decimal amount, string narration)
+    [InlineData(900, false)] // different amount
+    [InlineData(100, true)]  // accounts swapped
+    public async Task TransferAsync_Throws409_WhenAKeyIsReusedForADifferentRequest_AndMovesNothing(decimal amount, bool swapAccounts)
     {
         var (system, customer) = await SeedIdempotencyAccountsAsync();
         await SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, 100m, "x", "key-1"));
 
+        var (debit, credit) = swapAccounts
+            ? (customer.AccountNumber, system.AccountNumber)
+            : (system.AccountNumber, customer.AccountNumber);
         await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(() =>
-            SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, amount, narration, "key-1")));
+            SendAsync(new TransferRequest(debit, credit, amount, "x", "key-1")));
 
         Assert.Equal(100m, await CustomerBalanceAsync(customer));
         await using var ctx = _fixture.CreateContext();
         Assert.Equal(1, await ctx.Transactions.CountAsync());
+    }
+
+    [Fact]
+    public async Task TransferAsync_RetryWithADifferentNarration_ReplaysTheOriginal_AndKeepsItsNarration()
+    {
+        // Narration is a description, not part of the money movement (decision #44): an orchestrator that
+        // stamps "attempt 2" on a retry must get the original transfer back, not a 409.
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+        var first = await SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, 100m, "Rent", "key-1"));
+
+        var retry = await SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, 100m, "Rent (attempt 2)", "key-1"));
+
+        Assert.Equal(first.Reference, retry.Reference);
+        Assert.Equal(100m, await CustomerBalanceAsync(customer));
+        await using var ctx = _fixture.CreateContext();
+        var transaction = await ctx.Transactions.SingleAsync();
+        Assert.Equal("Rent", transaction.Narration);
+    }
+
+    [Fact]
+    public async Task TransferAsync_ReplaysARowHashedWithTheOldFormula()
+    {
+        // Transactions from 6 to 15 October 2026 were hashed with the narration included. An exact retry of
+        // one of them must still be replayed, not rejected because the formula changed.
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+        var oldFormulaHash = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new[]
+            {
+                system.AccountNumber, customer.AccountNumber, "100", "Rent",
+            }))));
+        await using (var ctx = _fixture.CreateContext())
+        {
+            ctx.Transactions.Add(new Transaction
+            {
+                Reference = "TXN-OLDHASH", IdempotencyKey = "key-1", InitiatedBy = "test-client",
+                RequestHash = oldFormulaHash, Status = TransactionStatus.Success,
+                CreatedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow,
+            });
+            await ctx.SaveChangesAsync();
+        }
+
+        var retry = await SendAsync(new TransferRequest(system.AccountNumber, customer.AccountNumber, 100m, "Rent", "key-1"));
+
+        Assert.Equal("TXN-OLDHASH", retry.Reference);
     }
 
     [Fact]

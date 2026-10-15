@@ -69,19 +69,29 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
             Status = transaction.Status.ToString(),
         });
 
-    // Fingerprint of the fields that define a transfer. JSON keeps the fields unambiguous, and the amount is
-    // normalised so 100 and 100.00 are the same request.
-    private static string HashRequest(TransferRequest request)
+    // Fingerprint of the fields that decide how money moves: debit account, credit account and amount
+    // (normalised so 100 = 100.00). JSON keeps the fields unambiguous. Narration is only a description: a retry
+    // with a different narration is the same transfer and gets the original back, original narration
+    // included (decision #44).
+    private static string HashRequest(TransferRequest request) => Sha256Base64(JsonSerializer.Serialize(new[]
     {
-        var fields = JsonSerializer.Serialize(new[]
-        {
-            request.DebitAccountNumber,
-            request.CreditAccountNumber,
-            request.Amount.ToString("G29", CultureInfo.InvariantCulture),
-            request.Narration ?? "",
-        });
-        return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(fields)));
-    }
+        request.DebitAccountNumber,
+        request.CreditAccountNumber,
+        request.Amount.ToString("G29", CultureInfo.InvariantCulture),
+    }));
+
+    // The formula used from 6 to 15 October 2026, which included the narration. Kept only so an exact retry of
+    // a transaction from that window still matches; remove once those keys are past any realistic retry.
+    private static string LegacyHashRequest(TransferRequest request) => Sha256Base64(JsonSerializer.Serialize(new[]
+    {
+        request.DebitAccountNumber,
+        request.CreditAccountNumber,
+        request.Amount.ToString("G29", CultureInfo.InvariantCulture),
+        request.Narration ?? "",
+    }));
+
+    private static string Sha256Base64(string text) =>
+        Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 
     public async Task<TransferResponse> TransferAsync(TransferRequest request, CancellationToken cancellationToken = default)
     {
@@ -118,8 +128,9 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
                     await RollbackAsync(dbTransaction);
 
                     // Same key, different request: refuse rather than report the old result as this one's (409).
-                    // Rows from before request hashes were stored (null) are treated as a match.
-                    if (dbInsertedTransaction.RequestHash is not null && dbInsertedTransaction.RequestHash != requestHash)
+                    // The stored hash may come from either formula; null (rows from before hashes) counts as a match.
+                    var storedHash = dbInsertedTransaction.RequestHash;
+                    if (storedHash is not null && storedHash != requestHash && storedHash != LegacyHashRequest(request))
                         throw new DuplicateIdempotencyKeyException(
                             $"Idempotency key '{request.IdempotencyKey}' was already used for a different request.");
 

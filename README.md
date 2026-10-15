@@ -9,7 +9,7 @@ The design, including every trade-off, is in [docs/DESIGN.md](docs/DESIGN.md). S
 - **Double entry.** Every successful transaction writes exactly one debit and one matching credit, in one database transaction.
 - **Derived balances.** There is no balance column. A balance is `SUM(credits) − SUM(debits)` over an account's entries.
 - **Append-only.** Entries are never updated or deleted. A reversal writes new opposite entries.
-- **Idempotency.** Money-moving requests and account creation carry an idempotency key, unique per API client. An exact retry returns the stored result; the same key with a different request gets 409.
+- **Idempotency.** Money-moving requests and account creation carry an idempotency key, unique per API client. A retry with the same key returns the stored result (a changed narration is fine); the same key with a different account or amount gets 409. Keys are 1-128 characters of letters, digits, `-`, `_`, `.` or `:`.
 - **No overdraft under concurrency.** The debited account is locked (`SELECT … FOR UPDATE`) while its balance is checked.
 
 ## Try it live
@@ -39,7 +39,7 @@ Use **Try it out** on each endpoint. Anything in `<angle brackets>` comes from a
    ```json
    { "customerAccountNumber": "<Ada's account>", "amount": 5000, "narration": "Initial funding", "idempotencyKey": "<your-name>-deposit-1" }
    ```
-   Use your own `idempotencyKey` values. Keys are scoped to your API key, so other visitors cannot collide with you, and each key is tied to the request it was first used for: reusing it with a different amount or account returns **409**.
+   Use your own `idempotencyKey` values. Keys are scoped to your API key, so other visitors cannot collide with you, and each key is tied to the request it was first used for: reusing it with a different amount or account returns **409**, while a different narration still returns the original. Keys are 1-128 characters of letters, digits, `-`, `_`, `.` or `:`.
 
 3. **Transfer between them.** `POST /api/transfers`:
    ```json
