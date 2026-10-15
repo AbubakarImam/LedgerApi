@@ -7,4 +7,6 @@ public static class AuditActions
     public const string SystemAccountCreated = "SystemAccountCreated";
     public const string Transfer = "Transfer";
     public const string Reversal = "Reversal";
+    public const string ChainPosted = "ChainPosted";
+    public const string ChainReversed = "ChainReversed";
 }

@@ -46,6 +46,7 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
     {
         AccountNotFoundException => (StatusCodes.Status404NotFound, "Account not found."),
         TransactionNotFoundException => (StatusCodes.Status404NotFound, "Transaction not found."),
+        ChainNotFoundException => (StatusCodes.Status404NotFound, "Chain not found."),
         TransactionNotReversibleException => (StatusCodes.Status422UnprocessableEntity, "Transaction cannot be reversed."),
         DuplicateIdempotencyKeyException => (StatusCodes.Status409Conflict, "Duplicate idempotency key."),
         AlreadyReversedException => (StatusCodes.Status409Conflict, "Transaction has already been reversed."),
