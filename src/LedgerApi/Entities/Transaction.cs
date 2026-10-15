@@ -17,4 +17,11 @@ public class Transaction
     // SHA-256 of the request's business fields, so a reused idempotency key with a different body is
     // detected (decision #42). Null for transactions created before it existed and for reversals.
     public string? RequestHash { get; set; }
+
+    // Set only on a chain leg (decision #45): the chain, the leg's 1-based position and its purpose.
+    // Null for transactions outside a chain, including every row from before chains existed.
+    public long? ChainId { get; set; }
+    public TransactionChain? Chain { get; set; }
+    public int? Sequence { get; set; }
+    public LegPurpose? Purpose { get; set; }
 }

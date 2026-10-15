@@ -88,3 +88,32 @@ Content-Type: application/json
   "originalTransactionReference": "TXN-REPLACEME",
   "reason": "Customer dispute"
 }
+
+### Chain: principal + fee (fee must credit a system account)
+POST {{LedgerApi_HostAddress}}/api/chains
+X-Api-Key: {{paymentKey}}
+Content-Type: application/json
+
+{
+  "idempotencyKey": "{{$guid}}",
+  "narration": "Rent",
+  "legs": [
+    { "debitAccountNumber": "{{customerAccount}}", "creditAccountNumber": "{{otherAccount}}", "amount": 1500.00, "purpose": "Principal" },
+    { "debitAccountNumber": "{{customerAccount}}", "creditAccountNumber": "NGN100000001", "amount": 15.00, "purpose": "Fee" }
+  ]
+}
+
+### Chain enquiry (use a reference returned by the chain above)
+GET {{LedgerApi_HostAddress}}/api/chains/CHN-REPLACEME
+X-Api-Key: {{paymentKey}}
+Accept: application/json
+
+### Chain reversal (every leg, last first)
+POST {{LedgerApi_HostAddress}}/api/chains/CHN-REPLACEME/reversals
+X-Api-Key: {{opsKey}}
+Content-Type: application/json
+
+{
+  "reason": "Customer dispute"
+}
+

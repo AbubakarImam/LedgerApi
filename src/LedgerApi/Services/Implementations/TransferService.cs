@@ -18,6 +18,8 @@ namespace LedgerApi.Services;
 
 public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger, ICurrentClient currentClient) : ITransferService
 {
+    private readonly LegPoster legPoster = new(dbContext);
+
     //accept idempotency key from the request(client-supplied)
     // Attempt to insert transaction envelope with the key, the calling client and a hash of the request
     // On unique-constraint violation for (client, key): same request hash -> return the stored result, no reprocessing;
@@ -161,124 +163,28 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
             throw;
         }
 
-        if (request.Amount <= 0m)
-            return await FailTransferAsync(transaction, request, "Amount must be positive", dbTransaction, cancellationToken);
-
-        Account? sourceAccount;
         try
         {
-            //Locking Source Account 
-            sourceAccount = await dbContext.Accounts.FromSqlInterpolated($"""
-                SELECT * FROM "accounts" WHERE "account_number" = {request.DebitAccountNumber}
-                FOR UPDATE
-                """).SingleOrDefaultAsync(cancellationToken);
+            // The posting rules live in LegPoster, shared with chains (decision #45). A rejection stages nothing,
+            // so the envelope is committed as Failed with the reason, as before (decision #6).
+            var sourceAccount = await legPoster.PostLegAsync(
+                transaction,
+                new LegSpec(request.DebitAccountNumber, request.CreditAccountNumber, request.Amount),
+                checkBalance: true,
+                now,
+                cancellationToken);
 
-        }
-        catch
-        {
-            await RollbackAsync(dbTransaction);
-            throw;
-        }
-        if (sourceAccount is null)
-            return await FailTransferAsync(transaction, request, "Source account not found", dbTransaction, cancellationToken);
+            //Record Audit, committed with the entries
+            RecordAudit(transaction, request, sourceAccount.CurrencyCode);
 
-        Account? destinationAccount;
-        try
-        {
-            //Getting Destination Account
-            destinationAccount = await dbContext.Accounts
-                .SingleOrDefaultAsync(x => x.AccountNumber == request.CreditAccountNumber, cancellationToken);
-
-        }
-        catch
-        {
-            await RollbackAsync(dbTransaction); throw;
-        }
-        if (destinationAccount is null)
-            return await FailTransferAsync(transaction, request, "Destination account not found", dbTransaction, cancellationToken);
-
-        //Check Source account status
-        if (sourceAccount.Status != AccountStatus.Active)
-            return await FailTransferAsync(transaction, request, "Source account not active", dbTransaction, cancellationToken);
-
-        //Check Destination account status
-        if (destinationAccount.Status == AccountStatus.Blocked)
-            return await FailTransferAsync(transaction, request, "Destination account is blocked", dbTransaction, cancellationToken);
-
-        // Check Currency Code
-        if (sourceAccount.CurrencyCode != destinationAccount.CurrencyCode)
-            return await FailTransferAsync(transaction, request, "Conflicting currency type", dbTransaction, cancellationToken);
-
-        // Check Amount fits the currency's decimal places (e.g. whole numbers only for XOF or JPY).
-        // Without this, decimal(18,2) would silently round 10.005 to 10.01 instead of rejecting it.
-        if (!SupportedCurrencies.DecimalPlaces.TryGetValue(sourceAccount.CurrencyCode, out var decimalPlaces))
-            return await FailTransferAsync(transaction, request, $"Currency {sourceAccount.CurrencyCode} is not supported", dbTransaction, cancellationToken);
-        if (decimal.Round(request.Amount, decimalPlaces) != request.Amount)
-            return await FailTransferAsync(transaction, request,
-                $"Amount has more decimal places than {sourceAccount.CurrencyCode} allows ({decimalPlaces})", dbTransaction, cancellationToken);
-
-        //Derive account balance
-        var balance = await dbContext.LedgerEntries.Where(x => x.AccountId == sourceAccount.Id)
-           .SumAsync(x => x.EntryType == EntryType.Credit ? x.Amount : -x.Amount, cancellationToken);
-       
-        //Check Sufficient funds
-        var sourceAccountBalance = balance - request.Amount;
-
-        if (sourceAccount.AccountClass == AccountClass.Customer)
-        {
-            if (sourceAccountBalance < 0m)
-                return await FailTransferAsync(transaction, request, "Insufficient Account Balance", dbTransaction, cancellationToken);
-        }
-        else if (sourceAccount.AccountClass == AccountClass.System)
-        {
-            if (sourceAccountBalance < -1_000_000_000_000m)
-                return await FailTransferAsync(transaction, request, "Insufficient Account Balance", dbTransaction, cancellationToken);
-        }
-        else
-        {
-            return await FailTransferAsync(transaction, request, $"Unrecognized account class: {sourceAccount.AccountClass}", dbTransaction, cancellationToken);
-        }
-        //Append Debit Entry
-        var debitEntry = new LedgerEntry
-        {
-            TransactionId = transaction.Id,
-            AccountId = sourceAccount.Id,
-            EntryType = EntryType.Debit,
-            Amount = request.Amount,
-            Currency = sourceAccount.CurrencyCode,
-            CreatedAt = now,
-            Transaction = transaction,
-            Account = sourceAccount
-        };
-        await dbContext.LedgerEntries.AddAsync(debitEntry);
-
-
-        //Append Credit Entry
-        var creditEntry = new LedgerEntry
-        {
-            TransactionId = transaction.Id,
-            AccountId = destinationAccount.Id,
-            EntryType = EntryType.Credit,
-            Amount = request.Amount,
-            Currency = destinationAccount.CurrencyCode,
-            CreatedAt = now,
-            Transaction = transaction,
-            Account = destinationAccount
-        };
-        await dbContext.LedgerEntries.AddAsync(creditEntry);
-
-        transaction.Status = TransactionStatus.Success;
-        transaction.CompletedAt = DateTimeOffset.UtcNow;
-
-        //Record Audit, committed with the entries
-        RecordAudit(transaction, request, sourceAccount.CurrencyCode);
-
-        try
-        {
-            
             await dbContext.SaveChangesAsync(cancellationToken);
             await dbTransaction.CommitAsync(cancellationToken);
-        } catch
+        }
+        catch (LegRejectedException rejected)
+        {
+            return await FailTransferAsync(transaction, request, rejected.Message, dbTransaction, cancellationToken);
+        }
+        catch
         {
             await RollbackAsync(dbTransaction); throw;
         }

@@ -91,6 +91,7 @@ try
 
     builder.Services.AddScoped<ITransferService, TransferService>();
     builder.Services.AddScoped<IReversalService, ReversalService>();
+    builder.Services.AddScoped<IChainService, ChainService>();
     builder.Services.AddScoped<IAccountService, AccountService>();
     builder.Services.AddScoped<IAdminAccountService, AdminAccountService>();
     builder.Services.AddScoped<IDepositService, DepositService>();
@@ -102,6 +103,7 @@ try
     builder.Services.AddScoped<DepositRequestValidator>();
     builder.Services.AddScoped<ReversalRequestValidator>();
     builder.Services.AddScoped<WithdrawalRequestValidator>();
+    builder.Services.AddScoped<ChainRequestValidator>();
 
     var app = builder.Build();
 

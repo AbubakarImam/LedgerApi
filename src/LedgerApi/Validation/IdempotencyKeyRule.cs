@@ -8,12 +8,16 @@ public static partial class IdempotencyKeyRule
 {
     public const int MaxLength = 128;
 
+    // Chain legs get generated keys "chain:{chainId}:{sequence}" (decision #45); clients may not use the prefix.
+    public const string ReservedPrefix = "chain:";
+
     // \z, not $: in .NET, $ also matches just before a trailing newline, so "abc\n" would pass.
     [GeneratedRegex(@"^[A-Za-z0-9._:-]{1,128}\z")]
     private static partial Regex Pattern();
 
     public static string? Validate(string? key) =>
         string.IsNullOrWhiteSpace(key) ? "IdempotencyKey is required."
-        : Pattern().IsMatch(key) ? null
-        : $"IdempotencyKey must be 1-{MaxLength} characters: letters, digits, '-', '_', '.' or ':'.";
+        : !Pattern().IsMatch(key) ? $"IdempotencyKey must be 1-{MaxLength} characters: letters, digits, '-', '_', '.' or ':'."
+        : key.StartsWith(ReservedPrefix, StringComparison.OrdinalIgnoreCase) ? $"IdempotencyKey must not start with '{ReservedPrefix}': it is reserved for chain legs."
+        : null;
 }
