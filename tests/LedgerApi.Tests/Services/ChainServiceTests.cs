@@ -323,7 +323,8 @@ public class ChainServiceTests : IAsyncLifetime
         var chain = await PostThreeLegChainAsync();
         await ReverseAsync(chain.Reference);
 
-        await Assert.ThrowsAsync<AlreadyReversedException>(() => ReverseAsync(chain.Reference));
+        // The chain subtype (its own 409 title); still an AlreadyReversedException for callers that catch that.
+        await Assert.ThrowsAsync<ChainAlreadyReversedException>(() => ReverseAsync(chain.Reference));
 
         Assert.Equal(1000m, await BalanceAsync(A));
     }
@@ -375,8 +376,8 @@ public class ChainServiceTests : IAsyncLifetime
         var reversal = await ReverseAsync(chain.Reference);
         var failed = await PostAsync("failed", Leg(C, B, 100m)); // C has no money
 
-        await Assert.ThrowsAsync<TransactionNotReversibleException>(() => ReverseAsync(failed.Reference));
-        await Assert.ThrowsAsync<TransactionNotReversibleException>(() => ReverseAsync(reversal.Reference));
+        await Assert.ThrowsAsync<ChainNotReversibleException>(() => ReverseAsync(failed.Reference));
+        await Assert.ThrowsAsync<ChainNotReversibleException>(() => ReverseAsync(reversal.Reference));
         await Assert.ThrowsAsync<ChainNotFoundException>(() => ReverseAsync("CHN-DOESNOTEXIST"));
     }
 
