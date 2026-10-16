@@ -81,6 +81,18 @@ try
         .ValidateOnStart();
     builder.Services.AddSingleton<IValidateOptions<FundingOptions>, FundingOptionsValidator>();
 
+    // Fee-income and tax-payable accounts (decision #46). Same validate-at-startup shape as
+    // Funding; not read by any endpoint yet - that wiring is future orchestrator/ProductApi work.
+    builder.Services.AddOptions<FeeIncomeOptions>()
+        .Bind(builder.Configuration.GetSection("FeeIncome"))
+        .ValidateOnStart();
+    builder.Services.AddSingleton<IValidateOptions<FeeIncomeOptions>, FeeIncomeOptionsValidator>();
+
+    builder.Services.AddOptions<TaxPayableOptions>()
+        .Bind(builder.Configuration.GetSection("TaxPayable"))
+        .ValidateOnStart();
+    builder.Services.AddSingleton<IValidateOptions<TaxPayableOptions>, TaxPayableOptionsValidator>();
+
     // AuditLogger reads the actor, IP, user agent and correlation id of the current request.
     builder.Services.AddHttpContextAccessor();
     builder.Services.AddScoped<ICurrentClient, HttpCurrentClient>();
