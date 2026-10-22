@@ -221,6 +221,8 @@ Every request gets a **correlation id**. Send your own in an `X-Correlation-ID` 
 
 To investigate a request, search the logs for its correlation id, then query `audit_logs` by `correlation_id`.
 
+This is deliberately all GARBATI ships today — no metrics/tracing/alerting stack. See `garbati-platform`'s `OBSERVABILITY.md` for why, and what to reach for if you need more.
+
 ## Deployment
 
 The `Dockerfile` builds two images:
