@@ -245,7 +245,7 @@ docker run -p 8080:8080 \
 - The API listens on port **8080** as a non-root user. Terminate HTTPS at the platform or a proxy (DESIGN.md decision #36).
 - `ASPNETCORE_ENVIRONMENT` defaults to `Production`: Swagger is off, `appsettings.Development.json` is not in the image, and with no `ApiKeys` configured every request gets 401.
 - Health checks (no API key needed): **`/health/live`** answers while the process runs (use it for restarts); **`/health/ready`** also checks the database (use it for routing traffic and gating deploys). Platforms with a single health URL should use `/health/ready`.
-- Use a managed PostgreSQL with point-in-time recovery: the ledger's entries are the only source of truth for balances.
+- Use a managed PostgreSQL with point-in-time recovery: the ledger's entries are the only source of truth for balances. See `docs/DISASTER-RECOVERY.md` for the actual restore procedure, recovery targets, and a real, dated restore drill.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the tests and builds both images on every pull request and push to `main`.
 
