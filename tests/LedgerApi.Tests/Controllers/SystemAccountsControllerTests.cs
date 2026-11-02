@@ -58,4 +58,18 @@ public class SystemAccountsControllerTests
         Assert.Contains(errors, e => e.Contains("Crypto"));
         Assert.Equal(0, service.Calls);
     }
+
+    // Decision #48: the optional GlAccountId passes through unchanged; existence of the GL account
+    // itself is a service-layer concern (AdminAccountServiceTests), not the controller's.
+    [Fact]
+    public async Task CreateSystemAccount_PassesTheGlAccountIdThrough_WhenSupplied()
+    {
+        var service = new StubAdminAccountService(Account);
+        var controller = CreateController(service);
+        var request = new CreateAccountRequest("NGN Fees", "Wallet", "NGN", "key-3", GlAccountId: 42);
+
+        await controller.CreateSystemAccount(request, CancellationToken.None);
+
+        Assert.Equal(42, service.ReceivedRequest?.GlAccountId);
+    }
 }
