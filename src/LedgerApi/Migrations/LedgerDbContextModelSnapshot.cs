@@ -60,6 +60,10 @@ namespace LedgerApi.Migrations
                         .HasColumnType("text")
                         .HasColumnName("currency_code");
 
+                    b.Property<long?>("GlAccountId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("gl_account_id");
+
                     b.Property<string>("IdempotencyKey")
                         .HasColumnType("text")
                         .HasColumnName("idempotency_key");
@@ -87,6 +91,9 @@ namespace LedgerApi.Migrations
                     b.HasIndex("AccountNumber")
                         .IsUnique()
                         .HasDatabaseName("ix_accounts_account_number");
+
+                    b.HasIndex("GlAccountId")
+                        .HasDatabaseName("ix_accounts_gl_account_id");
 
                     b.HasIndex("InitiatedBy", "IdempotencyKey")
                         .IsUnique()
@@ -182,6 +189,54 @@ namespace LedgerApi.Migrations
                         .HasDatabaseName("ix_audit_logs_entity_id");
 
                     b.ToTable("audit_logs", (string)null);
+                });
+
+            modelBuilder.Entity("LedgerApi.Entities.GlAccount", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AccountType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("account_type");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<long?>("ParentGlAccountId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("parent_gl_account_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_gl_accounts");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_gl_accounts_code");
+
+                    b.HasIndex("ParentGlAccountId")
+                        .HasDatabaseName("ix_gl_accounts_parent_gl_account_id");
+
+                    b.ToTable("gl_accounts", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_gl_accounts_account_type", "\"account_type\" IN ('Asset', 'Liability', 'Equity', 'Income', 'Expense')");
+                        });
                 });
 
             modelBuilder.Entity("LedgerApi.Entities.LedgerEntry", b =>
@@ -445,6 +500,26 @@ namespace LedgerApi.Migrations
                         });
                 });
 
+            modelBuilder.Entity("LedgerApi.Entities.Account", b =>
+                {
+                    b.HasOne("LedgerApi.Entities.GlAccount", null)
+                        .WithMany()
+                        .HasForeignKey("GlAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_accounts_gl_accounts_gl_account_id");
+                });
+
+            modelBuilder.Entity("LedgerApi.Entities.GlAccount", b =>
+                {
+                    b.HasOne("LedgerApi.Entities.GlAccount", "ParentGlAccount")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentGlAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_gl_accounts_gl_accounts_parent_gl_account_id");
+
+                    b.Navigation("ParentGlAccount");
+                });
+
             modelBuilder.Entity("LedgerApi.Entities.LedgerEntry", b =>
                 {
                     b.HasOne("LedgerApi.Entities.Account", "Account")
@@ -512,6 +587,11 @@ namespace LedgerApi.Migrations
             modelBuilder.Entity("LedgerApi.Entities.Account", b =>
                 {
                     b.Navigation("Entries");
+                });
+
+            modelBuilder.Entity("LedgerApi.Entities.GlAccount", b =>
+                {
+                    b.Navigation("Children");
                 });
 
             modelBuilder.Entity("LedgerApi.Entities.Transaction", b =>

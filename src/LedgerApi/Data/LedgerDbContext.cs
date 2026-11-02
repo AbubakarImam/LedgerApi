@@ -11,6 +11,7 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
     public DbSet<LedgerEntry> LedgerEntries => Set<LedgerEntry>();
     public DbSet<Reversal> Reversals => Set<Reversal>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<GlAccount> GlAccounts => Set<GlAccount>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -28,6 +29,27 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
             entity.Property(a => a.Status).HasConversion<string>();
             entity.ToTable(t => t.HasCheckConstraint("ck_accounts_account_class", "\"account_class\" IN ('Customer', 'System')"));
             entity.ToTable(t => t.HasCheckConstraint("ck_accounts_status", "\"status\" IN ('Active', 'Frozen', 'Blocked')"));
+
+            // How the balance rolls up for reporting (decision #48). No navigation property on Account:
+            // it carries only the id, keeping the posting side (LegPoster/ChainService) untouched.
+            entity.HasOne<GlAccount>()
+                .WithMany()
+                .HasForeignKey(a => a.GlAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<GlAccount>(entity =>
+        {
+            entity.HasKey(g => g.Id);
+            entity.HasIndex(g => g.Code).IsUnique();
+            entity.Property(g => g.AccountType).HasConversion<string>();
+            entity.ToTable(t => t.HasCheckConstraint("ck_gl_accounts_account_type",
+                "\"account_type\" IN ('Asset', 'Liability', 'Equity', 'Income', 'Expense')"));
+
+            entity.HasOne(g => g.ParentGlAccount)
+                .WithMany(g => g.Children)
+                .HasForeignKey(g => g.ParentGlAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Transaction>(entity =>
