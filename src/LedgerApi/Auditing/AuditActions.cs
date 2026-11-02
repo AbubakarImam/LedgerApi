@@ -9,4 +9,5 @@ public static class AuditActions
     public const string Reversal = "Reversal";
     public const string ChainPosted = "ChainPosted";
     public const string ChainReversed = "ChainReversed";
+    public const string GlAccountCreated = "GlAccountCreated";
 }
