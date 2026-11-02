@@ -27,6 +27,9 @@ public class AuthorizationTests(ApiFixture fixture)
         { "GET", "/api/chains/CHN-DOESNOTEXIST", null, LedgerScopes.Read },
         { "POST", "/api/chains/CHN-DOESNOTEXIST/reversals", null, LedgerScopes.Reverse },
         { "POST", "/api/admin/system-accounts", $$"""{"accountName":"Auth Test System","accountType":"Wallet","currencyCode":"NGN","idempotencyKey":"{{Guid.NewGuid()}}"}""", LedgerScopes.Admin },
+        { "POST", "/api/admin/gl-accounts", $$"""{"code":"{{Guid.NewGuid()}}","name":"Auth Test GL","accountType":"Asset","parentGlAccountId":null}""", LedgerScopes.Admin },
+        { "GET", "/api/admin/gl-accounts", null, LedgerScopes.Admin },
+        { "GET", "/api/reports/trial-balance", null, LedgerScopes.Read },
     };
 
     private static HttpRequestMessage Request(string method, string path, string? body)

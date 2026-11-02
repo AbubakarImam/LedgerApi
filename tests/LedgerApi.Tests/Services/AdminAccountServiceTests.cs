@@ -90,4 +90,48 @@ public class AdminAccountServiceTests : IAsyncLifetime
         await using var verifyCtx = _fixture.CreateContext();
         Assert.Equal(1, await verifyCtx.Accounts.CountAsync());
     }
+
+    // Decision #48: SystemAccountsController's create endpoint gains an optional GlAccountId.
+
+    [Fact]
+    public async Task AdminAccountAsync_WithAGlAccountId_PersistsItOnTheCreatedAccount()
+    {
+        await using var ctx = _fixture.CreateContext();
+        var glAccount = new GlAccount { Code = "1000", Name = "Cash", AccountType = GlAccountType.Asset, CreatedAt = DateTimeOffset.UtcNow };
+        ctx.GlAccounts.Add(glAccount);
+        await ctx.SaveChangesAsync();
+
+        var response = await new AdminAccountService(ctx, TestAudit.For(ctx), TestCaller.Default)
+            .CreateSystemAccountAsync(new CreateAccountRequest("Test Account", "Wallet", "NGN", Guid.NewGuid().ToString(), glAccount.Id));
+
+        await using var verifyCtx = _fixture.CreateContext();
+        var account = await verifyCtx.Accounts.SingleAsync(a => a.AccountNumber == response.AccountNumber);
+        Assert.Equal(glAccount.Id, account.GlAccountId);
+    }
+
+    [Fact]
+    public async Task AdminAccountAsync_WithNoGlAccountId_LeavesItNull()
+    {
+        await using var ctx = _fixture.CreateContext();
+
+        var response = await new AdminAccountService(ctx, TestAudit.For(ctx), TestCaller.Default)
+            .CreateSystemAccountAsync(new CreateAccountRequest("Test Account", "Wallet", "NGN", Guid.NewGuid().ToString()));
+
+        await using var verifyCtx = _fixture.CreateContext();
+        var account = await verifyCtx.Accounts.SingleAsync(a => a.AccountNumber == response.AccountNumber);
+        Assert.Null(account.GlAccountId);
+    }
+
+    [Fact]
+    public async Task AdminAccountAsync_WithAnUnknownGlAccountId_Throws404_AndCreatesNothing()
+    {
+        await using var ctx = _fixture.CreateContext();
+
+        await Assert.ThrowsAsync<GlAccountNotFoundException>(() =>
+            new AdminAccountService(ctx, TestAudit.For(ctx), TestCaller.Default)
+                .CreateSystemAccountAsync(new CreateAccountRequest("Test Account", "Wallet", "NGN", Guid.NewGuid().ToString(), 999)));
+
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Equal(0, await verifyCtx.Accounts.CountAsync());
+    }
 }

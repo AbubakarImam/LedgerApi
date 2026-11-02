@@ -120,6 +120,9 @@ Service tests run against a real PostgreSQL container started by [Testcontainers
 | `POST` | `/api/chains` | Post a chain of legs (e.g. principal + fee + tax) in one database transaction |
 | `GET` | `/api/chains/{reference}` | A chain and its legs |
 | `POST` | `/api/chains/{reference}/reversals` | Reverse every leg of a chain, last leg first |
+| `POST` | `/api/admin/gl-accounts` | Create a chart-of-accounts (GL) category |
+| `GET` | `/api/admin/gl-accounts` | List every GL account |
+| `GET` | `/api/reports/trial-balance` | Every GL account's rolled-up balance, by currency (decision #48) |
 
 ### Chains
 
@@ -151,8 +154,8 @@ A chain posts a payment and its fee and tax together: every leg commits in one d
 | `400` | Request failed validation |
 | `401` | Missing or unknown API key |
 | `403` | The API key lacks the endpoint's scope |
-| `404` | Account or transaction not found |
-| `409` | Transaction or chain already reversed, or an idempotency key reused with a different request |
+| `404` | Account, transaction or GL account not found |
+| `409` | Transaction or chain already reversed, an idempotency key reused with a different request, or a duplicate GL account code |
 | `422` | A business rule failed: insufficient funds, account status, currency mismatch, or a transaction that can't be reversed. For transfers, deposits and withdrawals the failure is committed and the body carries `reference`, `status: "Failed"` and `failureReason`. A retry with the same idempotency key returns the same 422. |
 | `500` | Unexpected error. Retry with the **same** idempotency key to learn whether money moved. |
 
@@ -171,12 +174,12 @@ The ledger authenticates **calling services**, not customers (DESIGN.md decision
 
 | Scope | Endpoints |
 |---|---|
-| `ledger.read` | `GET /api/accounts/{n}`, `GET /api/accounts/{n}/balance`, `GET /api/chains/{reference}` |
+| `ledger.read` | `GET /api/accounts/{n}`, `GET /api/accounts/{n}/balance`, `GET /api/chains/{reference}`, `GET /api/reports/trial-balance` |
 | `ledger.accounts` | `POST /api/accounts` |
 | `ledger.transfer` | `POST /api/transfers`, `POST /api/chains` |
 | `ledger.funding` | `POST /api/deposits`, `POST /api/withdrawals` |
 | `ledger.reverse` | `POST /api/reversals`, `POST /api/chains/{reference}/reversals` |
-| `ledger.admin` | `POST /api/admin/system-accounts` |
+| `ledger.admin` | `POST /api/admin/system-accounts`, `POST /api/admin/gl-accounts`, `GET /api/admin/gl-accounts` |
 
 A missing or unknown key gets **401**; a valid key without the endpoint's scope gets **403**.
 

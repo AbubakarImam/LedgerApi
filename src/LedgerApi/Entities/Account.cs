@@ -12,6 +12,10 @@ public class Account
     public long? UserId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
+    // How this account's balance rolls up for reporting (decision #48). Null means not categorized yet -
+    // not every account is, by design; the trial-balance report simply excludes a null one.
+    public long? GlAccountId { get; set; }
+
     public ICollection<LedgerEntry> Entries { get; set; } = new List<LedgerEntry>();
 
     // Idempotency for account creation (mirrors Transaction): null for accounts created before this

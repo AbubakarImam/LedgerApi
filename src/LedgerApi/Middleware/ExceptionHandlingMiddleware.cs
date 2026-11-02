@@ -47,6 +47,8 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
         AccountNotFoundException => (StatusCodes.Status404NotFound, "Account not found."),
         TransactionNotFoundException => (StatusCodes.Status404NotFound, "Transaction not found."),
         ChainNotFoundException => (StatusCodes.Status404NotFound, "Chain not found."),
+        GlAccountNotFoundException => (StatusCodes.Status404NotFound, "GL account not found."),
+        DuplicateGlAccountCodeException => (StatusCodes.Status409Conflict, "Duplicate GL account code."),
         ChainNotReversibleException => (StatusCodes.Status422UnprocessableEntity, "Chain cannot be reversed."),
         TransactionNotReversibleException => (StatusCodes.Status422UnprocessableEntity, "Transaction cannot be reversed."),
         DuplicateIdempotencyKeyException => (StatusCodes.Status409Conflict, "Duplicate idempotency key."),

@@ -66,6 +66,20 @@ public class CheckConstraintTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GlAccount_WithUnknownAccountType_IsRejectedByTheDatabase()
+    {
+        await using var ctx = _fixture.CreateContext();
+
+        var ex = await Assert.ThrowsAsync<PostgresException>(() => ctx.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO gl_accounts (code, name, account_type, created_at)
+            VALUES ('9999', 'Bad Type', 'Crypto', now())
+            """));
+
+        Assert.Equal(PostgresErrorCodes.CheckViolation, ex.SqlState);
+        Assert.Equal("ck_gl_accounts_account_type", ex.ConstraintName);
+    }
+
+    [Fact]
     public async Task ValidEntryTypesAndStatuses_AreAccepted()
     {
         var (accountId, transactionId) = await SeedAsync();

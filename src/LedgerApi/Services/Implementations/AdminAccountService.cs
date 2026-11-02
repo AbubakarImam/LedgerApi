@@ -16,6 +16,8 @@ namespace LedgerApi.Services;
 public class AdminAccountService(LedgerDbContext dbContext, IAuditLogger auditLogger, ICurrentClient currentClient) : IAdminAccountService
 {
     // Mirrors AccountService.HashRequest: fingerprints the fields that define the account being created.
+    // GlAccountId is included (decision #48): a retried key with a different GL account is a different
+    // request, not a replay of the first one.
     private static string HashRequest(CreateAccountRequest request)
     {
         var fields = JsonSerializer.Serialize(new[]
@@ -25,6 +27,7 @@ public class AdminAccountService(LedgerDbContext dbContext, IAuditLogger auditLo
             // "Savings" describe the same account and must hash the same.
             Enum.Parse<AccountType>(request.AccountType, ignoreCase: true).ToString(),
             request.CurrencyCode,
+            request.GlAccountId?.ToString() ?? "",
         });
         return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(fields)));
     }
@@ -45,6 +48,14 @@ public class AdminAccountService(LedgerDbContext dbContext, IAuditLogger auditLo
         var clientId = currentClient.ClientId;
         var requestHash = HashRequest(request);
 
+        // Decision #48: a supplied GlAccountId must reference a real GlAccount. Checked once, before the
+        // retry loop, the same way a bad request is rejected before any account-number work begins.
+        if (request.GlAccountId is { } glAccountId
+            && !await dbContext.GlAccounts.AnyAsync(g => g.Id == glAccountId, cancellationToken))
+        {
+            throw new GlAccountNotFoundException($"GL account '{glAccountId}' does not exist.");
+        }
+
         for(int a = 1;  a <= maxAttempts; a++)
         {
             var random = Random.Shared.NextInt64(100_000_000, 1_000_000_000).ToString();
@@ -63,6 +74,7 @@ public class AdminAccountService(LedgerDbContext dbContext, IAuditLogger auditLo
                 IdempotencyKey = request.IdempotencyKey,
                 InitiatedBy = clientId,
                 RequestHash = requestHash,
+                GlAccountId = request.GlAccountId,
             };
 
             await dbContext.Accounts.AddAsync(account);
