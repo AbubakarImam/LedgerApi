@@ -93,6 +93,10 @@ public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger
             Status = TransactionStatus.Pending,
             Narration = request.Reason ?? $"Reversal of {original.Reference}",
             CreatedAt = now,
+            // The reversal gets its own ValueDate (its own creation date); BranchCode/Channel/DecisionId stay
+            // null since ReversalRequest carries none (decisions #49-#52) — the original transaction's own
+            // values are untouched.
+            ValueDate = DateOnly.FromDateTime(now.UtcDateTime),
         };
 
         // The reversal rules live in LegReverser, shared with chain reversals (decision #45).
@@ -103,6 +107,10 @@ public class ReversalService(LedgerDbContext dbContext, IAuditLogger auditLogger
             reversalTransaction.Status.ToString(),
             reversalTransaction.Narration,
             reversalTransaction.CreatedAt,
-            reversalTransaction.CompletedAt);
+            reversalTransaction.CompletedAt,
+            ValueDate: reversalTransaction.ValueDate,
+            BranchCode: reversalTransaction.BranchCode,
+            Channel: reversalTransaction.Channel,
+            DecisionId: reversalTransaction.DecisionId);
     }
 }

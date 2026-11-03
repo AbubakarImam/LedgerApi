@@ -75,6 +75,9 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
                 RequestHash = requestHash,
                 Status = TransactionStatus.Pending,
                 Narration = request.Narration,
+                BranchCode = request.BranchCode,
+                Channel = request.Channel,
+                DecisionId = request.DecisionId,
                 CreatedAt = now,
             };
             dbContext.TransactionChains.Add(chain);
@@ -97,6 +100,16 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             try
             {
                 var postedLegs = await PostLegsAsync(chain, legs, request.Narration, clientId, now, cancellationToken);
+
+                // Value date (decision #49), chain-level: checked after every leg's account/balance checks
+                // above, not in ChainRequestValidator — a mismatch is a business-logic rejection (422,
+                // ValueDateMismatchException), not a request-shape error. Not caught by ChainRejectedException
+                // below, so it rolls back the whole chain like a technical failure (nothing is stored as Failed).
+                var creationDate = DateOnly.FromDateTime(now.UtcDateTime);
+                if (request.ValueDate is { } suppliedValueDate && suppliedValueDate != creationDate)
+                    throw new ValueDateMismatchException(
+                        $"Value date '{suppliedValueDate:yyyy-MM-dd}' does not match the chain's creation date '{creationDate:yyyy-MM-dd}'.");
+                chain.ValueDate = creationDate;
 
                 chain.Status = TransactionStatus.Success;
                 chain.CompletedAt = DateTimeOffset.UtcNow;
@@ -176,6 +189,10 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             Narration = reason ?? $"Reversal of {original.Reference}",
             ReversesChainId = original.Id,
             CreatedAt = now,
+            // The reversal gets its own ValueDate (its own creation date); BranchCode/Channel/DecisionId stay
+            // null since ChainReversalRequest carries none (decisions #49-#52) — the original leg's own
+            // values are untouched on the original chain row.
+            ValueDate = DateOnly.FromDateTime(now.UtcDateTime),
         };
         dbContext.TransactionChains.Add(reversal);
         try
@@ -340,6 +357,9 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             RequestHash = requestHash,
             Status = TransactionStatus.Failed,
             Narration = request.Narration,
+            BranchCode = request.BranchCode,
+            Channel = request.Channel,
+            DecisionId = request.DecisionId,
             FailureReason = rejection.Message,
             FailedSequence = rejection.Sequence,
             CreatedAt = now,
@@ -404,7 +424,10 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
     private static ChainResponse ToResponse(
         TransactionChain chain, IReadOnlyList<ChainLegResponse> legs, string? reversesReference, string? reversedByReference) =>
         new(chain.Reference, chain.Status.ToString(), chain.Narration, chain.FailureReason, chain.FailedSequence,
-            reversesReference, reversedByReference, chain.CreatedAt, chain.CompletedAt, legs);
+            reversesReference, reversedByReference, chain.CreatedAt, chain.CompletedAt, legs,
+            // As stored (decisions #49-#52), chain-level: ValueDate is only ever non-null once the chain has
+            // actually posted (Success), the other three only if the caller supplied them.
+            ValueDate: chain.ValueDate, BranchCode: chain.BranchCode, Channel: chain.Channel, DecisionId: chain.DecisionId);
 
     private void RecordChainAudit(TransactionChain chain, string action, decimal totalAmount, string? currency) =>
         auditLogger.Record(new AuditLog
