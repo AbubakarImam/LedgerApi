@@ -95,6 +95,23 @@ public class ReversalServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReverseAsync_GivesTheReversalItsOwnValueDate_AndLeavesBranchCodeChannelDecisionIdNull()
+    {
+        // Decisions #49-#52: ReversalRequest carries none of the four new fields, so the reversal row gets
+        // its own ValueDate (its own creation date, the same default every envelope gets) while the other
+        // three stay null — the original transaction's own values (if any) are untouched.
+        var (system, customer, _) = await SeedAccountsAsync();
+        var originalReference = await TransferAsync(system.AccountNumber, customer.AccountNumber, 100m);
+
+        var response = await ReverseAsync(originalReference);
+
+        Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow), response.ValueDate);
+        Assert.Null(response.BranchCode);
+        Assert.Null(response.Channel);
+        Assert.Null(response.DecisionId);
+    }
+
+    [Fact]
     public async Task ReverseAsync_DefaultsNarration_WhenNoReasonGiven()
     {
         var (system, customer, _) = await SeedAccountsAsync();

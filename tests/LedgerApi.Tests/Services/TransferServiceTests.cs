@@ -911,4 +911,133 @@ public class TransferServiceTests : IAsyncLifetime
 
         Assert.NotEqual("TXN-LEGACY", response.Reference);
     }
+
+    // ---- Value date, branch code, channel, decision id (decisions #49-#52) ----
+
+    [Fact]
+    public async Task TransferAsync_DefaultsValueDate_ToTheCreationDate_WhenOmitted()
+    {
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+
+        var response = await SendAsync(new TransferRequest(
+            system.AccountNumber, customer.AccountNumber, 100m, "x", Guid.NewGuid().ToString()));
+
+        Assert.Equal("Success", response.Status);
+        Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow), response.ValueDate);
+
+        await using var ctx = _fixture.CreateContext();
+        var transaction = await ctx.Transactions.SingleAsync(t => t.Reference == response.Reference);
+        Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow), transaction.ValueDate);
+    }
+
+    [Fact]
+    public async Task TransferAsync_Succeeds_WhenSuppliedValueDateMatchesTheCreationDate()
+    {
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var response = await SendAsync(new TransferRequest(
+            system.AccountNumber, customer.AccountNumber, 100m, "x", Guid.NewGuid().ToString(), ValueDate: today));
+
+        Assert.Equal("Success", response.Status);
+        Assert.Equal(today, response.ValueDate);
+    }
+
+    [Fact]
+    public async Task TransferAsync_Throws422_WhenSuppliedValueDateDoesNotMatchTheCreationDate_AndPostsNothing()
+    {
+        // Decision #49: back/forward-value-dating is not opened yet, so a caller-supplied value_date that
+        // disagrees with the server's own creation date is a business-logic rejection (422), not a
+        // request-shape error, and nothing commits (unlike an insufficient-funds rejection, which is stored
+        // as a Failed transaction).
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+        var wrongDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);
+        var key = Guid.NewGuid().ToString();
+
+        await Assert.ThrowsAsync<ValueDateMismatchException>(() => SendAsync(new TransferRequest(
+            system.AccountNumber, customer.AccountNumber, 100m, "x", key, ValueDate: wrongDate)));
+
+        await using var ctx = _fixture.CreateContext();
+        Assert.Empty(await ctx.Transactions.Where(t => t.IdempotencyKey == key).ToListAsync());
+        Assert.Empty(await ctx.LedgerEntries.ToListAsync());
+
+        // Nothing committed, so the same key can still be used for a real attempt.
+        var retry = await SendAsync(new TransferRequest(
+            system.AccountNumber, customer.AccountNumber, 100m, "x", key));
+        Assert.Equal("Success", retry.Status);
+    }
+
+    [Fact]
+    public async Task TransferAsync_RoundTripsBranchCodeChannelAndDecisionId_FromRequestToResponseAndStorage()
+    {
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+
+        var response = await SendAsync(new TransferRequest(
+            system.AccountNumber, customer.AccountNumber, 100m, "x", Guid.NewGuid().ToString(),
+            BranchCode: "BR-01", Channel: "OpsConsole", DecisionId: "decision-123"));
+
+        Assert.Equal("BR-01", response.BranchCode);
+        Assert.Equal("OpsConsole", response.Channel);
+        Assert.Equal("decision-123", response.DecisionId);
+
+        await using var ctx = _fixture.CreateContext();
+        var transaction = await ctx.Transactions.SingleAsync(t => t.Reference == response.Reference);
+        Assert.Equal("BR-01", transaction.BranchCode);
+        Assert.Equal("OpsConsole", transaction.Channel);
+        Assert.Equal("decision-123", transaction.DecisionId);
+    }
+
+    [Fact]
+    public async Task TransferAsync_LeavesBranchCodeChannelAndDecisionId_Null_WhenOmitted()
+    {
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+
+        var response = await SendAsync(new TransferRequest(
+            system.AccountNumber, customer.AccountNumber, 100m, "x", Guid.NewGuid().ToString()));
+
+        Assert.Null(response.BranchCode);
+        Assert.Null(response.Channel);
+        Assert.Null(response.DecisionId);
+    }
+
+    // The one easiest thing to get backwards by instinct: adding a new field often tempts someone to also
+    // add it to the idempotency request hash "for completeness". Decision #44 already settled this exact
+    // question for Narration; the same reasoning applies to all four new fields here, since none of them
+    // changes which accounts money moves between or how much (decision #49-#52's own text says so
+    // explicitly). A retry with the same key, same debit/credit/amount, and a DIFFERENT value in one of the
+    // four new fields must still replay the original transaction (200), never 409.
+    [Theory]
+    [MemberData(nameof(RetriesWithADifferentNewField))]
+    public async Task TransferAsync_RetryWithADifferentNewField_ReplaysTheOriginal_NotA409(
+        TransferRequest first, TransferRequest retryWithADifferentField)
+    {
+        var (system, customer) = await SeedIdempotencyAccountsAsync();
+        var seeded = first with { DebitAccountNumber = system.AccountNumber, CreditAccountNumber = customer.AccountNumber };
+        var retry = retryWithADifferentField with { DebitAccountNumber = system.AccountNumber, CreditAccountNumber = customer.AccountNumber };
+
+        var firstResponse = await SendAsync(seeded);
+        var retryResponse = await SendAsync(retry);
+
+        Assert.Equal("Success", firstResponse.Status);
+        Assert.Equal(firstResponse.Reference, retryResponse.Reference);
+        Assert.Equal(100m, await CustomerBalanceAsync(customer));
+
+        await using var ctx = _fixture.CreateContext();
+        Assert.Equal(1, await ctx.Transactions.CountAsync(t => t.IdempotencyKey == "replay-new-fields"));
+    }
+
+    public static IEnumerable<object[]> RetriesWithADifferentNewField()
+    {
+        // DebitAccountNumber/CreditAccountNumber are placeholders, overwritten with the real seeded
+        // accounts inside the test; the key, amount and narration (the fields the hash is made of, plus
+        // narration which decision #44 already excludes) stay identical across first and retry in every case.
+        TransferRequest Base(DateOnly? valueDate = null, string? branchCode = null, string? channel = null, string? decisionId = null) =>
+            new("placeholder-debit", "placeholder-credit", 100m, "x", "replay-new-fields", valueDate, branchCode, channel, decisionId);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        yield return [Base(valueDate: today), Base()]; // ValueDate supplied, then omitted
+        yield return [Base(branchCode: "BR-01"), Base(branchCode: "BR-02")];
+        yield return [Base(channel: "OpsConsole"), Base(channel: "MobileApp")];
+        yield return [Base(decisionId: "decision-123"), Base(decisionId: "decision-456")];
+    }
 }
