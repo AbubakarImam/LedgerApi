@@ -7,4 +7,10 @@ public record TransferResponse(
     // Set only for a chain leg (decision #45).
     string? ChainReference = null,
     int? Sequence = null,
-    string? Purpose = null);
+    string? Purpose = null,
+    // As stored (decisions #49-#52): ValueDate is always populated after a successful post; the other three
+    // only if the caller supplied them.
+    DateOnly? ValueDate = null,
+    string? BranchCode = null,
+    string? Channel = null,
+    string? DecisionId = null);

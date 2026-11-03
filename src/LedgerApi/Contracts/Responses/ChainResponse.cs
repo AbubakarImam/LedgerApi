@@ -12,7 +12,14 @@ public record ChainResponse(
     string? ReversedByChainReference,
     DateTimeOffset CreatedAt,
     DateTimeOffset? CompletedAt,
-    IReadOnlyList<ChainLegResponse> Legs);
+    IReadOnlyList<ChainLegResponse> Legs,
+    // Chain-level, as stored (decisions #49-#52): one value applies to every leg, so these do not repeat on
+    // ChainLegResponse. ValueDate is always populated after a successful post; the other three only if the
+    // caller supplied them.
+    DateOnly? ValueDate = null,
+    string? BranchCode = null,
+    string? Channel = null,
+    string? DecisionId = null);
 
 public record ChainLegResponse(
     int Sequence,
