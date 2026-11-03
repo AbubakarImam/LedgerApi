@@ -394,4 +394,148 @@ public class ChainServiceTests : IAsyncLifetime
         Assert.Contains($"is part of chain '{chain.Reference}'; reverse the chain", ex.Message);
         Assert.Equal(488m, await BalanceAsync(A));
     }
+
+    // ---- Value date, branch code, channel, decision id (decisions #49-#52) ----
+    // Chain-level, not per-leg: one value applies to every leg (DESIGN.md Section 8), so the individual
+    // leg rows (Transaction, via ChainLegResponse) never carry their own copy.
+
+    private async Task<ChainResponse> PostRequestAsync(ChainRequest request)
+    {
+        await using var ctx = _fixture.CreateContext();
+        return await new ChainService(ctx, TestAudit.For(ctx), TestCaller.Default).PostAsync(request);
+    }
+
+    [Fact]
+    public async Task ReverseAsync_GivesTheReversalItsOwnValueDate_AndLeavesBranchCodeChannelDecisionIdNull()
+    {
+        // ChainReversalRequest carries none of the four new fields (decisions #49-#52), so the reversal
+        // chain gets its own ValueDate (its own creation date) while the other three stay null.
+        var chain = await PostThreeLegChainAsync();
+
+        var reversal = await ReverseAsync(chain.Reference);
+
+        Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow), reversal.ValueDate);
+        Assert.Null(reversal.BranchCode);
+        Assert.Null(reversal.Channel);
+        Assert.Null(reversal.DecisionId);
+    }
+
+    [Fact]
+    public async Task PostAsync_DefaultsValueDate_ToTheCreationDate_WhenOmitted()
+    {
+        await SeedAsync();
+        await FundAsync(A, 1000m);
+
+        var chain = await PostRequestAsync(new ChainRequest("value-date-omitted", "Rent", [Leg(A, B, 100m)]));
+
+        Assert.Equal("Success", chain.Status);
+        Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow), chain.ValueDate);
+    }
+
+    [Fact]
+    public async Task PostAsync_Succeeds_WhenSuppliedValueDateMatchesTheCreationDate()
+    {
+        await SeedAsync();
+        await FundAsync(A, 1000m);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var chain = await PostRequestAsync(new ChainRequest("value-date-matches", "Rent", [Leg(A, B, 100m)], ValueDate: today));
+
+        Assert.Equal("Success", chain.Status);
+        Assert.Equal(today, chain.ValueDate);
+    }
+
+    [Fact]
+    public async Task PostAsync_Throws422_WhenSuppliedValueDateDoesNotMatchTheCreationDate_AndPostsNothing()
+    {
+        await SeedAsync();
+        await FundAsync(A, 1000m);
+        var wrongDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);
+
+        await Assert.ThrowsAsync<ValueDateMismatchException>(() => PostRequestAsync(
+            new ChainRequest("value-date-mismatch", "Rent", [Leg(A, B, 100m)], ValueDate: wrongDate)));
+
+        Assert.Equal(1000m, await BalanceAsync(A)); // nothing posted, unlike a stored Failed chain
+        await using var ctx = _fixture.CreateContext();
+        Assert.Empty(await ctx.TransactionChains.Where(c => c.IdempotencyKey == "value-date-mismatch").ToListAsync());
+
+        // Nothing committed, so the same key can still be used for a real attempt.
+        var retry = await PostRequestAsync(new ChainRequest("value-date-mismatch", "Rent", [Leg(A, B, 100m)]));
+        Assert.Equal("Success", retry.Status);
+    }
+
+    [Fact]
+    public async Task PostAsync_RoundTripsBranchCodeChannelAndDecisionId_AtTheChainLevel_NotPerLeg()
+    {
+        await SeedAsync();
+        await FundAsync(A, 1000m);
+
+        var chain = await PostRequestAsync(new ChainRequest(
+            "chain-level-fields", "Rent", [Leg(A, B, 100m), Leg(A, Fees, 5m, "Fee")],
+            BranchCode: "BR-01", Channel: "OpsConsole", DecisionId: "decision-123"));
+
+        Assert.Equal("BR-01", chain.BranchCode);
+        Assert.Equal("OpsConsole", chain.Channel);
+        Assert.Equal("decision-123", chain.DecisionId);
+
+        await using var ctx = _fixture.CreateContext();
+        var storedChain = await ctx.TransactionChains.SingleAsync(c => c.Reference == chain.Reference);
+        Assert.Equal("BR-01", storedChain.BranchCode);
+        Assert.Equal("OpsConsole", storedChain.Channel);
+        Assert.Equal("decision-123", storedChain.DecisionId);
+
+        // Chain-level, not per-leg: the leg rows themselves carry none of it.
+        var legs = await ctx.Transactions.Where(t => t.ChainId == storedChain.Id).ToListAsync();
+        Assert.Equal(2, legs.Count);
+        Assert.All(legs, l =>
+        {
+            Assert.Null(l.BranchCode);
+            Assert.Null(l.Channel);
+            Assert.Null(l.DecisionId);
+            Assert.Null(l.ValueDate);
+        });
+    }
+
+    // The one easiest thing to get backwards by instinct: adding a new field often tempts someone to also
+    // add it to the idempotency request hash "for completeness". Decision #44 already settled this exact
+    // question for Narration; the same reasoning applies to all four new fields, since none of them
+    // changes which accounts money moves between or how much. A retry with the same key and the same legs,
+    // but a DIFFERENT value in one of the four new fields, must still replay the original chain (200),
+    // never 409.
+    [Theory]
+    [MemberData(nameof(ChainRetriesWithADifferentNewField))]
+    public async Task PostAsync_RetryWithADifferentNewField_ReplaysTheOriginalChain_NotA409(
+        DateOnly? firstValueDate, string? firstBranchCode, string? firstChannel, string? firstDecisionId,
+        DateOnly? retryValueDate, string? retryBranchCode, string? retryChannel, string? retryDecisionId)
+    {
+        await SeedAsync();
+        await FundAsync(A, 1000m);
+        const string key = "chain-replay-new-fields";
+
+        var first = await PostRequestAsync(new ChainRequest(
+            key, "Rent", [Leg(A, B, 100m)], firstValueDate, firstBranchCode, firstChannel, firstDecisionId));
+        var retry = await PostRequestAsync(new ChainRequest(
+            key, "Rent", [Leg(A, B, 100m)], retryValueDate, retryBranchCode, retryChannel, retryDecisionId));
+
+        Assert.Equal("Success", first.Status);
+        Assert.Equal(first.Reference, retry.Reference);
+        Assert.Equal(900m, await BalanceAsync(A));
+        Assert.Equal(100m, await BalanceAsync(B));
+
+        await using var ctx = _fixture.CreateContext();
+        Assert.Equal(1, await ctx.TransactionChains.CountAsync(c => c.IdempotencyKey == key));
+    }
+
+    public static IEnumerable<object?[]> ChainRetriesWithADifferentNewField()
+    {
+        DateOnly? today = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly? noDate = null;
+        string? noText = null;
+
+        // first ValueDate/BranchCode/Channel/DecisionId, then retry's — only one differs each time.
+        yield return new object?[] { today, noText, noText, noText, noDate, noText, noText, noText }; // ValueDate supplied, then omitted
+        yield return new object?[] { noDate, "BR-01", noText, noText, noDate, "BR-02", noText, noText };
+        yield return new object?[] { noDate, noText, "OpsConsole", noText, noDate, noText, "MobileApp", noText };
+        yield return new object?[] { noDate, noText, noText, "decision-123", noDate, noText, noText, "decision-456" };
+    }
 }

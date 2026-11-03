@@ -49,8 +49,19 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
         RecordAudit(transaction, request, currency: null);
         await dbContext.SaveChangesAsync(cancellationToken);
         await dbTransaction.CommitAsync(cancellationToken);
-        return new TransferResponse(transaction.Reference, transaction.Status.ToString(), transaction.FailureReason);
+        return ToResponse(transaction);
     }
+
+    // As stored (decisions #49-#52): ValueDate is only ever non-null here once a leg has actually posted
+    // (set in TransferAsync after LegPoster's checks succeed); a failed or not-yet-posted envelope keeps it null.
+    private static TransferResponse ToResponse(Transaction transaction) => new(
+        transaction.Reference,
+        transaction.Status.ToString(),
+        transaction.FailureReason,
+        ValueDate: transaction.ValueDate,
+        BranchCode: transaction.BranchCode,
+        Channel: transaction.Channel,
+        DecisionId: transaction.DecisionId);
 
     // Rollback is cleanup, not work: it must run even if the client has disconnected, so it never takes
     // the request's token. With a cancelled token it would throw before rolling back and hide the
@@ -112,6 +123,9 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
             RequestHash = requestHash,
             Status = TransactionStatus.Pending,
             Narration = request.Narration,
+            BranchCode = request.BranchCode,
+            Channel = request.Channel,
+            DecisionId = request.DecisionId,
             CreatedAt = now
         };
         await dbContext.Transactions.AddAsync(transaction);
@@ -136,13 +150,7 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
                         throw new DuplicateIdempotencyKeyException(
                             $"Idempotency key '{request.IdempotencyKey}' was already used for a different request.");
 
-                    return new TransferResponse(
-                        dbInsertedTransaction.Reference,
-                        dbInsertedTransaction.Status.ToString(),
-                        dbInsertedTransaction.FailureReason
-                        );
-
-
+                    return ToResponse(dbInsertedTransaction);
                 }
                 else
                 {
@@ -174,6 +182,15 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
                 now,
                 cancellationToken);
 
+            // Value date (decision #49): checked after the account/balance checks above, not in
+            // TransferRequestValidator — a mismatch is a business-logic rejection (422, ValueDateMismatchException),
+            // not a request-shape error. An omitted value defaults to the real creation date.
+            var creationDate = DateOnly.FromDateTime(now.UtcDateTime);
+            if (request.ValueDate is { } suppliedValueDate && suppliedValueDate != creationDate)
+                throw new ValueDateMismatchException(
+                    $"Value date '{suppliedValueDate:yyyy-MM-dd}' does not match the transaction's creation date '{creationDate:yyyy-MM-dd}'.");
+            transaction.ValueDate = creationDate;
+
             //Record Audit, committed with the entries
             RecordAudit(transaction, request, sourceAccount.CurrencyCode);
 
@@ -189,6 +206,6 @@ public class TransferService(LedgerDbContext dbContext, IAuditLogger auditLogger
             await RollbackAsync(dbTransaction); throw;
         }
 
-        return new TransferResponse(transaction.Reference, transaction.Status.ToString());
+        return ToResponse(transaction);
     }
 }

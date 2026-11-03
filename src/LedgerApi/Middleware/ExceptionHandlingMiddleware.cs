@@ -56,6 +56,7 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
         AlreadyReversedException => (StatusCodes.Status409Conflict, "Transaction has already been reversed."),
         InsufficientFundsException => (StatusCodes.Status422UnprocessableEntity, "Insufficient funds."),
         CurrencyMismatchException => (StatusCodes.Status422UnprocessableEntity, "Currency mismatch."),
+        ValueDateMismatchException => (StatusCodes.Status422UnprocessableEntity, "Value date mismatch."),
         InvalidAccountStatusException => (StatusCodes.Status422UnprocessableEntity, "Account status does not allow this operation."),
         _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
     };

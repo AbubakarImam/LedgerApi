@@ -343,9 +343,17 @@ namespace LedgerApi.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<string>("BranchCode")
+                        .HasColumnType("text")
+                        .HasColumnName("branch_code");
+
                     b.Property<long?>("ChainId")
                         .HasColumnType("bigint")
                         .HasColumnName("chain_id");
+
+                    b.Property<string>("Channel")
+                        .HasColumnType("text")
+                        .HasColumnName("channel");
 
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone")
@@ -354,6 +362,10 @@ namespace LedgerApi.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<string>("DecisionId")
+                        .HasColumnType("text")
+                        .HasColumnName("decision_id");
 
                     b.Property<string>("FailureReason")
                         .HasColumnType("text")
@@ -394,6 +406,10 @@ namespace LedgerApi.Migrations
                         .HasColumnType("text")
                         .HasColumnName("status");
 
+                    b.Property<DateOnly?>("ValueDate")
+                        .HasColumnType("date")
+                        .HasColumnName("value_date");
+
                     b.HasKey("Id")
                         .HasName("pk_transactions");
 
@@ -430,6 +446,14 @@ namespace LedgerApi.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<string>("BranchCode")
+                        .HasColumnType("text")
+                        .HasColumnName("branch_code");
+
+                    b.Property<string>("Channel")
+                        .HasColumnType("text")
+                        .HasColumnName("channel");
+
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("completed_at");
@@ -437,6 +461,10 @@ namespace LedgerApi.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<string>("DecisionId")
+                        .HasColumnType("text")
+                        .HasColumnName("decision_id");
 
                     b.Property<int?>("FailedSequence")
                         .HasColumnType("integer")
@@ -476,6 +504,10 @@ namespace LedgerApi.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("status");
+
+                    b.Property<DateOnly?>("ValueDate")
+                        .HasColumnType("date")
+                        .HasColumnName("value_date");
 
                     b.HasKey("Id")
                         .HasName("pk_transaction_chains");
