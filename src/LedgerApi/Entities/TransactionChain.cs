@@ -21,5 +21,13 @@ public class TransactionChain
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
 
+    // Four additive, caller-supplied fields (decisions #49-#52), chain-level: one value applies to every leg,
+    // so the individual leg rows in Legs do not carry their own copy. Same RequestHash exclusion and
+    // ValueDate defaulting/mismatch rules as Transaction.
+    public DateOnly? ValueDate { get; set; }
+    public string? BranchCode { get; set; }
+    public string? Channel { get; set; }
+    public string? DecisionId { get; set; }
+
     public ICollection<Transaction> Legs { get; set; } = new List<Transaction>();
 }
