@@ -431,7 +431,7 @@ namespace LedgerApi.Migrations
                         {
                             t.HasCheckConstraint("ck_transactions_chain_leg", "(\"chain_id\" IS NULL AND \"sequence\" IS NULL AND \"purpose\" IS NULL) OR (\"chain_id\" IS NOT NULL AND \"sequence\" >= 1 AND \"purpose\" IS NOT NULL)");
 
-                            t.HasCheckConstraint("ck_transactions_purpose", "\"purpose\" IN ('Principal', 'Fee', 'Tax')");
+                            t.HasCheckConstraint("ck_transactions_purpose", "\"purpose\" IN ('Principal', 'Fee', 'Tax', 'Disbursement', 'Collection')");
 
                             t.HasCheckConstraint("ck_transactions_status", "\"status\" IN ('Pending', 'Success', 'Failed')");
                         });
@@ -449,6 +449,13 @@ namespace LedgerApi.Migrations
                     b.Property<string>("BranchCode")
                         .HasColumnType("text")
                         .HasColumnName("branch_code");
+
+                    b.Property<string>("ChainKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Payment")
+                        .HasColumnName("chain_kind");
 
                     b.Property<string>("Channel")
                         .HasColumnType("text")
@@ -528,6 +535,8 @@ namespace LedgerApi.Migrations
 
                     b.ToTable("transaction_chains", null, t =>
                         {
+                            t.HasCheckConstraint("ck_transaction_chains_chain_kind", "\"chain_kind\" IN ('Payment', 'Disbursement', 'Collection')");
+
                             t.HasCheckConstraint("ck_transaction_chains_status", "\"status\" IN ('Pending', 'Success', 'Failed')");
                         });
                 });

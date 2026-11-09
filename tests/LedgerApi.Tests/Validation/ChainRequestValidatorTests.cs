@@ -1,4 +1,5 @@
 using LedgerApi.Contracts.Requests;
+using LedgerApi.Entities;
 using LedgerApi.Validation;
 
 namespace LedgerApi.Tests.Validation;
@@ -10,6 +11,9 @@ public class ChainRequestValidatorTests
 
     private static IReadOnlyList<string> Validate(params ChainLegRequest[] legs) =>
         new ChainRequestValidator().Validate(new ChainRequest("key-1", null, legs));
+
+    private static IReadOnlyList<string> Validate(ChainKind kind, params ChainLegRequest[] legs) =>
+        new ChainRequestValidator().Validate(new ChainRequest("key-1", null, legs, ChainKind: kind));
 
     [Fact]
     public void AValidChain_HasNoErrors() =>

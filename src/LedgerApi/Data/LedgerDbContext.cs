@@ -66,7 +66,9 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
             // within its chain, and the purpose is one of the known values.
             entity.Property(t => t.Purpose).HasConversion<string>();
             entity.HasIndex(t => new { t.ChainId, t.Sequence }).IsUnique();
-            entity.ToTable(t => t.HasCheckConstraint("ck_transactions_purpose", "\"purpose\" IN ('Principal', 'Fee', 'Tax')"));
+            // Widened by decision #53 to admit Disbursement/Collection legs alongside the original three.
+            entity.ToTable(t => t.HasCheckConstraint("ck_transactions_purpose",
+                "\"purpose\" IN ('Principal', 'Fee', 'Tax', 'Disbursement', 'Collection')"));
             entity.ToTable(t => t.HasCheckConstraint("ck_transactions_chain_leg",
                 "(\"chain_id\" IS NULL AND \"sequence\" IS NULL AND \"purpose\" IS NULL) OR " +
                 "(\"chain_id\" IS NOT NULL AND \"sequence\" >= 1 AND \"purpose\" IS NOT NULL)"));
@@ -86,6 +88,12 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
             entity.HasIndex(c => c.ReversesChainId).IsUnique();
             entity.Property(c => c.Status).HasConversion<string>();
             entity.ToTable(t => t.HasCheckConstraint("ck_transaction_chains_status", "\"status\" IN ('Pending', 'Success', 'Failed')"));
+            // Decision #53: Payment (decision #45's original shape), Disbursement or Collection. NOT NULL
+            // DEFAULT 'Payment' at the database level too -- every pre-existing row genuinely was, and
+            // remains, a Payment chain; Postgres backfills it as part of the ADD COLUMN itself.
+            entity.Property(c => c.ChainKind).HasConversion<string>().HasDefaultValue(ChainKind.Payment);
+            entity.ToTable(t => t.HasCheckConstraint("ck_transaction_chains_chain_kind",
+                "\"chain_kind\" IN ('Payment', 'Disbursement', 'Collection')"));
             entity.HasOne(c => c.ReversesChain)
                 .WithMany()
                 .HasForeignKey(c => c.ReversesChainId)
