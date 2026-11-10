@@ -13,7 +13,7 @@ public class ChainRequestValidatorTests
         new ChainRequestValidator().Validate(new ChainRequest("key-1", null, legs));
 
     private static IReadOnlyList<string> Validate(ChainKind kind, params ChainLegRequest[] legs) =>
-        new ChainRequestValidator().Validate(new ChainRequest("key-1", null, legs, ChainKind: kind));
+        new ChainRequestValidator().Validate(new ChainRequest("key-1", null, legs, ChainKind: kind.ToString()));
 
     [Fact]
     public void AValidChain_HasNoErrors() =>

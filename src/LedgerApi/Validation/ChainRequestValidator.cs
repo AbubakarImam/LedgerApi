@@ -32,19 +32,26 @@ public class ChainRequestValidator
             errors.Add(keyError);
         }
 
+        var chainKind = ParseChainKind(request.ChainKind);
+        if (chainKind is null)
+        {
+            errors.Add("Chain kind must be Payment, Disbursement or Collection.");
+            return errors;
+        }
+
         if (request.Legs is null || request.Legs.Count == 0)
         {
             errors.Add("A chain needs at least one leg.");
             return errors;
         }
 
-        var maxLegs = request.ChainKind == ChainKind.Payment ? MaxLegs : MaxMultiEntryLegs;
+        var maxLegs = chainKind == ChainKind.Payment ? MaxLegs : MaxMultiEntryLegs;
         if (request.Legs.Count > maxLegs)
         {
             errors.Add($"A chain can have at most {maxLegs} legs.");
         }
 
-        var (allowedPurposes, purposeMessage) = PurposeRules[request.ChainKind];
+        var (allowedPurposes, purposeMessage) = PurposeRules[chainKind.Value];
         var purposes = new List<LegPurpose?>();
         for (var i = 0; i < request.Legs.Count; i++)
         {
@@ -72,7 +79,7 @@ public class ChainRequestValidator
             purposes.Add(purpose);
         }
 
-        switch (request.ChainKind)
+        switch (chainKind.Value)
         {
             case ChainKind.Payment:
                 ValidatePayment(purposes, errors);
@@ -142,4 +149,11 @@ public class ChainRequestValidator
     public static LegPurpose? ParsePurpose(string? value) =>
         Enum.GetNames<LegPurpose>().FirstOrDefault(name => string.Equals(name, value, StringComparison.OrdinalIgnoreCase))
             is { } match ? Enum.Parse<LegPurpose>(match) : null;
+
+    // Same split as ParsePurpose, same reason: ChainRequest.ChainKind is a plain string on the wire
+    // (decision #53's own fix, found by QA against the real HTTP endpoint -- a raw C# enum with no
+    // JsonStringEnumConverter only accepts the ordinal integer, not "Disbursement"/"Collection").
+    public static ChainKind? ParseChainKind(string? value) =>
+        Enum.GetNames<ChainKind>().FirstOrDefault(name => string.Equals(name, value, StringComparison.OrdinalIgnoreCase))
+            is { } match ? Enum.Parse<ChainKind>(match) : null;
 }

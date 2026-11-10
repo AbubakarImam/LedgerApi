@@ -558,7 +558,7 @@ public class ChainServiceTests : IAsyncLifetime
         var chain = await PostRequestAsync(new ChainRequest(
             "disbursement-basic", "Payroll",
             [DisbursementLeg(A, 100m), DisbursementLeg(B, 200m), DisbursementLeg(C, 300m)],
-            ChainKind: ChainKind.Disbursement));
+            ChainKind: "Disbursement"));
 
         Assert.Equal("Success", chain.Status);
         Assert.Equal("Disbursement", chain.ChainKind);
@@ -584,7 +584,7 @@ public class ChainServiceTests : IAsyncLifetime
         var chain = await PostRequestAsync(new ChainRequest(
             "collection-basic", "Bill run",
             [CollectionLeg(A, 50m), CollectionLeg(B, 75m), CollectionLeg(C, 125m)],
-            ChainKind: ChainKind.Collection));
+            ChainKind: "Collection"));
 
         Assert.Equal("Success", chain.Status);
         Assert.Equal("Collection", chain.ChainKind);
@@ -602,7 +602,7 @@ public class ChainServiceTests : IAsyncLifetime
         var chain = await PostRequestAsync(new ChainRequest(
             "disbursement-reversal", "Payroll",
             [DisbursementLeg(A, 100m), DisbursementLeg(B, 200m)],
-            ChainKind: ChainKind.Disbursement));
+            ChainKind: "Disbursement"));
         Assert.Equal(100m, await BalanceAsync(A));
         Assert.Equal(200m, await BalanceAsync(B));
 
@@ -624,11 +624,6 @@ public class ChainServiceTests : IAsyncLifetime
     public async Task SameKey_SameLegs_DifferentChainKind_Returns409()
     {
         await SeedAsync();
-        await using (var ctx = _fixture.CreateContext())
-        {
-            await new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default)
-                .TransferAsync(new TransferRequest(A, Funding, 0m, "noop", Guid.NewGuid().ToString()));
-        }
         const string key = "disbursement-vs-payment";
 
         // A chain whose debit/credit/amount/purpose columns happen to match a Disbursement leg's own shape
@@ -636,11 +631,11 @@ public class ChainServiceTests : IAsyncLifetime
         // purpose, decision #53) — so the "same legs" half of this test reuses the same Disbursement leg list,
         // varying only ChainKind itself between the two calls.
         var first = await PostRequestAsync(new ChainRequest(
-            key, "Rent", [DisbursementLeg(A, 100m)], ChainKind: ChainKind.Disbursement));
+            key, "Rent", [DisbursementLeg(A, 100m)], ChainKind: "Disbursement"));
         Assert.Equal("Success", first.Status);
 
         await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(() => PostRequestAsync(new ChainRequest(
-            key, "Rent", [DisbursementLeg(A, 100m)], ChainKind: ChainKind.Collection)));
+            key, "Rent", [DisbursementLeg(A, 100m)], ChainKind: "Collection")));
 
         // Confirmed by construction: ChainKind.Collection with a Disbursement-shaped leg list is itself
         // invalid per the validator (a Collection chain requires Collection-purpose legs) — this call bypasses

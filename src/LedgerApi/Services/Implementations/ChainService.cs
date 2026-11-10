@@ -55,12 +55,15 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
     public async Task<ChainResponse> PostAsync(ChainRequest request, CancellationToken cancellationToken = default)
     {
         var clientId = currentClient.ClientId;
+        // Validated already, at the controller boundary (ChainRequestValidator), same trust-the-caller
+        // pattern ParsePurpose below already uses -- the service never re-validates request shape.
+        var chainKind = ChainRequestValidator.ParseChainKind(request.ChainKind)!.Value;
         var legs = request.Legs
             .Select(l => new Leg(
                 new LegSpec(l.DebitAccountNumber, l.CreditAccountNumber, l.Amount),
                 ChainRequestValidator.ParsePurpose(l.Purpose)!.Value))
             .ToList();
-        var requestHash = HashLegs(request.ChainKind, legs);
+        var requestHash = HashLegs(chainKind, legs);
         // Pre-decision-#53 chains have no ChainKind in their stored hash (every one of them is implicitly
         // Payment); accepted on replay as a bridge, same as decision #44's narration-hash change.
         var legacyHash = LegacyHashLegs(legs);
@@ -77,7 +80,7 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
                 IdempotencyKey = request.IdempotencyKey,
                 RequestHash = requestHash,
                 Status = TransactionStatus.Pending,
-                ChainKind = request.ChainKind,
+                ChainKind = chainKind,
                 Narration = request.Narration,
                 BranchCode = request.BranchCode,
                 Channel = request.Channel,
@@ -364,7 +367,7 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             IdempotencyKey = request.IdempotencyKey,
             RequestHash = requestHash,
             Status = TransactionStatus.Failed,
-            ChainKind = request.ChainKind,
+            ChainKind = ChainRequestValidator.ParseChainKind(request.ChainKind)!.Value,
             Narration = request.Narration,
             BranchCode = request.BranchCode,
             Channel = request.Channel,
