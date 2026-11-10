@@ -19,7 +19,9 @@ public record ChainResponse(
     DateOnly? ValueDate = null,
     string? BranchCode = null,
     string? Channel = null,
-    string? DecisionId = null);
+    string? DecisionId = null,
+    // Payment, Disbursement or Collection (decision #53) -- always populated, every chain has a kind.
+    string ChainKind = "Payment");
 
 public record ChainLegResponse(
     int Sequence,

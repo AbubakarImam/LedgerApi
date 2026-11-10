@@ -156,4 +156,75 @@ public class ChainApiTests(ApiFixture fixture)
         using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("Transaction not found.", problem.RootElement.GetProperty("title").GetString());
     }
+
+    // ---- Multi-entry (N:M) posting: chainKind over the wire (decision #53) ----
+    // Found by QA against the real endpoint: ChainRequest.ChainKind must be the plain string "Disbursement"/
+    // "Collection" a real client would send, not the raw C# enum ordinal System.Text.Json defaults to with
+    // no converter configured. Every other test for this feature calls ChainService directly in-process,
+    // bypassing JSON entirely -- this is the one test that actually exercises the wire format.
+
+    private static async Task<(HttpStatusCode Status, JsonElement Body)> PostChainAsync(
+        HttpClient client, string key, string chainKind, params object[] legs)
+    {
+        using var response = await client.PostAsJsonAsync("/api/chains",
+            new { idempotencyKey = key, narration = "Payroll", legs, chainKind });
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return (response.StatusCode, json.RootElement.Clone());
+    }
+
+    [Fact]
+    public async Task DisbursementChain_WithTheRealStringChainKind_PostsSuccessfully()
+    {
+        using var client = Client();
+        var recipient1 = await CreateCustomerAsync(client);
+        var recipient2 = await CreateCustomerAsync(client);
+
+        var (status, chain) = await PostChainAsync(client, Guid.NewGuid().ToString(), "Disbursement",
+            Leg(NgnFunding, recipient1, 100m, "Disbursement"), Leg(NgnFunding, recipient2, 200m, "Disbursement"));
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("Success", chain.GetProperty("status").GetString());
+        Assert.Equal("Disbursement", chain.GetProperty("chainKind").GetString());
+    }
+
+    [Fact]
+    public async Task ChainKind_IsCaseInsensitive_LikePurpose()
+    {
+        using var client = Client();
+        var recipient = await CreateCustomerAsync(client);
+
+        var (status, chain) = await PostChainAsync(client, Guid.NewGuid().ToString(), "disbursement",
+            Leg(NgnFunding, recipient, 50m, "Disbursement"));
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("Disbursement", chain.GetProperty("chainKind").GetString());
+    }
+
+    [Fact]
+    public async Task AnUnknownChainKind_Returns400()
+    {
+        using var client = Client();
+        var recipient = await CreateCustomerAsync(client);
+
+        var (status, _) = await PostChainAsync(client, Guid.NewGuid().ToString(), "Bogus",
+            Leg(NgnFunding, recipient, 50m, "Disbursement"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+    }
+
+    [Fact]
+    public async Task OmittedChainKind_DefaultsToPayment()
+    {
+        using var client = Client();
+        var payer = await CreateCustomerAsync(client);
+        var (fundStatus, _) = await PostChainAsync(client, Guid.NewGuid().ToString(), Leg(NgnFunding, payer, 1000m, "Principal"));
+        Assert.Equal(HttpStatusCode.OK, fundStatus);
+
+        // The pre-existing PostChainAsync overload (no chainKind) is the real shape every caller before
+        // this decision used -- confirming it still defaults to "Payment" and still works unchanged.
+        var (status, chain) = await PostChainAsync(client, Guid.NewGuid().ToString(), Leg(payer, NgnFunding, 10m, "Principal"));
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("Payment", chain.GetProperty("chainKind").GetString());
+    }
 }

@@ -55,12 +55,18 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
     public async Task<ChainResponse> PostAsync(ChainRequest request, CancellationToken cancellationToken = default)
     {
         var clientId = currentClient.ClientId;
+        // Validated already, at the controller boundary (ChainRequestValidator), same trust-the-caller
+        // pattern ParsePurpose below already uses -- the service never re-validates request shape.
+        var chainKind = ChainRequestValidator.ParseChainKind(request.ChainKind)!.Value;
         var legs = request.Legs
             .Select(l => new Leg(
                 new LegSpec(l.DebitAccountNumber, l.CreditAccountNumber, l.Amount),
                 ChainRequestValidator.ParsePurpose(l.Purpose)!.Value))
             .ToList();
-        var requestHash = HashLegs(legs);
+        var requestHash = HashLegs(chainKind, legs);
+        // Pre-decision-#53 chains have no ChainKind in their stored hash (every one of them is implicitly
+        // Payment); accepted on replay as a bridge, same as decision #44's narration-hash change.
+        var legacyHash = LegacyHashLegs(legs);
         var reference = TransactionReference.Generate("CHN");
         var now = DateTimeOffset.UtcNow;
 
@@ -74,6 +80,7 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
                 IdempotencyKey = request.IdempotencyKey,
                 RequestHash = requestHash,
                 Status = TransactionStatus.Pending,
+                ChainKind = chainKind,
                 Narration = request.Narration,
                 BranchCode = request.BranchCode,
                 Channel = request.Channel,
@@ -89,7 +96,7 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             catch (DbUpdateException ex) when (IsIdempotencyConflict(ex))
             {
                 await RollbackAsync(dbTransaction);
-                return await ReplayAsync(clientId, request.IdempotencyKey, requestHash, cancellationToken);
+                return await ReplayAsync(clientId, request.IdempotencyKey, requestHash, legacyHash, cancellationToken);
             }
             catch
             {
@@ -131,7 +138,7 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             }
         }
 
-        return await StoreFailedAsync(request, clientId, requestHash, reference, now, rejection, cancellationToken);
+        return await StoreFailedAsync(request, clientId, requestHash, legacyHash, reference, now, rejection, cancellationToken);
     }
 
     public async Task<ChainResponse?> GetAsync(string reference, CancellationToken cancellationToken = default)
@@ -186,6 +193,10 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             // reversals by the same client as duplicates. reverses_chain_id is the real guard.
             IdempotencyKey = $"REVERSAL-{Guid.NewGuid()}",
             Status = TransactionStatus.Pending,
+            // The reversal is the same kind as what it reverses -- reversing a Disbursement chain is
+            // still structurally a Disbursement (one shared side, many distinct counterparties), just with
+            // the debit/credit roles swapped by LegReverser. For a Payment chain this is unchanged (Payment).
+            ChainKind = original.ChainKind,
             Narration = reason ?? $"Reversal of {original.Reference}",
             ReversesChainId = original.Id,
             CreatedAt = now,
@@ -345,7 +356,7 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
     // Second, small save after a rolled-back chain: store it as Failed with its audit row (decision #6). If a
     // same-key retry stored its own chain in the meantime, return that one instead.
     private async Task<ChainResponse> StoreFailedAsync(
-        ChainRequest request, string? clientId, string requestHash, string reference, DateTimeOffset now,
+        ChainRequest request, string? clientId, string requestHash, string legacyHash, string reference, DateTimeOffset now,
         ChainRejectedException rejection, CancellationToken cancellationToken)
     {
         dbContext.ChangeTracker.Clear();
@@ -356,6 +367,7 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             IdempotencyKey = request.IdempotencyKey,
             RequestHash = requestHash,
             Status = TransactionStatus.Failed,
+            ChainKind = ChainRequestValidator.ParseChainKind(request.ChainKind)!.Value,
             Narration = request.Narration,
             BranchCode = request.BranchCode,
             Channel = request.Channel,
@@ -375,22 +387,24 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
         catch (DbUpdateException ex) when (IsIdempotencyConflict(ex))
         {
             dbContext.ChangeTracker.Clear();
-            return await ReplayAsync(clientId, request.IdempotencyKey, requestHash, cancellationToken);
+            return await ReplayAsync(clientId, request.IdempotencyKey, requestHash, legacyHash, cancellationToken);
         }
 
         return ToResponse(failed, [], reversesReference: null, reversedByReference: null);
     }
 
     // The key is already taken by this client: same legs -> the stored chain; different legs -> 409.
+    // legacyHash is the pre-decision-#53 formula (no ChainKind) for the SAME incoming request, accepted so
+    // an exact retry of a chain stored before this decision still replays instead of getting a false 409.
     private async Task<ChainResponse> ReplayAsync(
-        string? clientId, string idempotencyKey, string requestHash, CancellationToken cancellationToken)
+        string? clientId, string idempotencyKey, string requestHash, string legacyHash, CancellationToken cancellationToken)
     {
         dbContext.ChangeTracker.Clear();
         var stored = await dbContext.TransactionChains.AsNoTracking()
             .Include(c => c.ReversesChain)
             .SingleAsync(c => c.InitiatedBy == clientId && c.IdempotencyKey == idempotencyKey, cancellationToken);
 
-        if (stored.RequestHash != requestHash)
+        if (stored.RequestHash != requestHash && stored.RequestHash != legacyHash)
             throw new DuplicateIdempotencyKeyException(
                 $"Idempotency key '{idempotencyKey}' was already used for a different request.");
 
@@ -427,7 +441,8 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             reversesReference, reversedByReference, chain.CreatedAt, chain.CompletedAt, legs,
             // As stored (decisions #49-#52), chain-level: ValueDate is only ever non-null once the chain has
             // actually posted (Success), the other three only if the caller supplied them.
-            ValueDate: chain.ValueDate, BranchCode: chain.BranchCode, Channel: chain.Channel, DecisionId: chain.DecisionId);
+            ValueDate: chain.ValueDate, BranchCode: chain.BranchCode, Channel: chain.Channel, DecisionId: chain.DecisionId,
+            ChainKind: chain.ChainKind.ToString());
 
     private void RecordChainAudit(TransactionChain chain, string action, decimal totalAmount, string? currency) =>
         auditLogger.Record(new AuditLog
@@ -440,9 +455,27 @@ public class ChainService(LedgerDbContext dbContext, IAuditLogger auditLogger, I
             Status = chain.Status.ToString(),
         });
 
-    // SHA-256 of the ordered legs as [debit, credit, amount (G29, so 100 = 100.00), purpose]. Narration is left
-    // out, as for transfers (decision #44).
-    private static string HashLegs(IEnumerable<Leg> legs) =>
+    // SHA-256 of ChainKind plus the ordered legs as [debit, credit, amount (G29, so 100 = 100.00), purpose].
+    // Narration is left out, as for transfers (decision #44). ChainKind is IN the hash (decision #53):
+    // changing Payment to Disbursement for the same leg list is a materially different request, unlike the
+    // four caller-supplied metadata fields (decisions #49-#52) that are correctly excluded.
+    private static string HashLegs(ChainKind chainKind, IEnumerable<Leg> legs) =>
+        Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new object[]
+        {
+            chainKind.ToString(),
+            legs.Select(l => new[]
+            {
+                l.Spec.DebitAccountNumber,
+                l.Spec.CreditAccountNumber,
+                l.Spec.Amount.ToString("G29", CultureInfo.InvariantCulture),
+                l.Purpose.ToString(),
+            }),
+        }))));
+
+    // Pre-decision-#53 hash formula: the legs only, no ChainKind (every chain before this decision was
+    // implicitly Payment). Kept so ReplayAsync still matches an exact retry of a chain stored before this
+    // decision shipped -- the same bridge decision #44 used when the transfer hash formula changed.
+    private static string LegacyHashLegs(IEnumerable<Leg> legs) =>
         Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(
             legs.Select(l => new[]
             {
