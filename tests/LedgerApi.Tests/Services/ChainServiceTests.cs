@@ -538,4 +538,153 @@ public class ChainServiceTests : IAsyncLifetime
         yield return new object?[] { noDate, noText, "OpsConsole", noText, noDate, noText, "MobileApp", noText };
         yield return new object?[] { noDate, noText, noText, "decision-123", noDate, noText, noText, "decision-456" };
     }
+
+    // ---- Multi-entry (N:M) posting: Disbursement/Collection chain kinds (decision #53) ----
+
+    private static ChainLegRequest DisbursementLeg(string credit, decimal amount, string debit = Funding) =>
+        new(debit, credit, amount, "Disbursement");
+
+    private static ChainLegRequest CollectionLeg(string debit, decimal amount, string credit = Funding) =>
+        new(debit, credit, amount, "Collection");
+
+    [Fact]
+    public async Task DisbursementChain_PostsAtomically_OneFundingAccountManyRecipients()
+    {
+        await SeedAsync();
+        // Funding is a System account with a very large overdraft floor (decision #45, Section 4) — exactly
+        // the same reason the existing FundAsync helper can debit it without ever pre-funding it first. No
+        // setup needed beyond the seeded accounts themselves.
+
+        var chain = await PostRequestAsync(new ChainRequest(
+            "disbursement-basic", "Payroll",
+            [DisbursementLeg(A, 100m), DisbursementLeg(B, 200m), DisbursementLeg(C, 300m)],
+            ChainKind: ChainKind.Disbursement));
+
+        Assert.Equal("Success", chain.Status);
+        Assert.Equal("Disbursement", chain.ChainKind);
+        Assert.Equal(3, chain.Legs.Count);
+        Assert.All(chain.Legs, l => Assert.Equal("Disbursement", l.Purpose));
+        Assert.Equal(100m, await BalanceAsync(A));
+        Assert.Equal(200m, await BalanceAsync(B));
+        Assert.Equal(300m, await BalanceAsync(C));
+
+        await using var verifyCtx = _fixture.CreateContext();
+        var stored = await verifyCtx.TransactionChains.SingleAsync(c => c.Reference == chain.Reference);
+        Assert.Equal(ChainKind.Disbursement, stored.ChainKind);
+    }
+
+    [Fact]
+    public async Task CollectionChain_PostsAtomically_ManyPayersOneBiller()
+    {
+        await SeedAsync();
+        await FundAsync(A, 500m);
+        await FundAsync(B, 500m);
+        await FundAsync(C, 500m);
+
+        var chain = await PostRequestAsync(new ChainRequest(
+            "collection-basic", "Bill run",
+            [CollectionLeg(A, 50m), CollectionLeg(B, 75m), CollectionLeg(C, 125m)],
+            ChainKind: ChainKind.Collection));
+
+        Assert.Equal("Success", chain.Status);
+        Assert.Equal("Collection", chain.ChainKind);
+        Assert.All(chain.Legs, l => Assert.Equal("Collection", l.Purpose));
+        Assert.Equal(450m, await BalanceAsync(A));
+        Assert.Equal(425m, await BalanceAsync(B));
+        Assert.Equal(375m, await BalanceAsync(C));
+    }
+
+    [Fact]
+    public async Task DisbursementChain_Reversal_RestoresAllBalances()
+    {
+        await SeedAsync();
+
+        var chain = await PostRequestAsync(new ChainRequest(
+            "disbursement-reversal", "Payroll",
+            [DisbursementLeg(A, 100m), DisbursementLeg(B, 200m)],
+            ChainKind: ChainKind.Disbursement));
+        Assert.Equal(100m, await BalanceAsync(A));
+        Assert.Equal(200m, await BalanceAsync(B));
+
+        var reversal = await ReverseAsync(chain.Reference);
+
+        Assert.Equal("Success", reversal.Status);
+        Assert.Equal("Disbursement", reversal.ChainKind); // inherits the original chain's kind
+        Assert.Equal(0m, await BalanceAsync(A));
+        Assert.Equal(0m, await BalanceAsync(B));
+        Assert.Equal(0m, await BalanceAsync(Funding));
+    }
+
+    // The most important thing to get right about this decision: ChainKind must be IN the request hash,
+    // unlike decisions #49-#52's four metadata fields. Proven both directions: a retry with the SAME kind
+    // replays (below, implicitly covered by SameKey_WithTheSameLegs_ReplaysTheChain_AndPostsOnce already
+    // passing for Payment); a retry with a DIFFERENT kind for the same legs must 409, not silently create a
+    // second chain or replay the wrong one.
+    [Fact]
+    public async Task SameKey_SameLegs_DifferentChainKind_Returns409()
+    {
+        await SeedAsync();
+        await using (var ctx = _fixture.CreateContext())
+        {
+            await new TransferService(ctx, TestAudit.For(ctx), TestCaller.Default)
+                .TransferAsync(new TransferRequest(A, Funding, 0m, "noop", Guid.NewGuid().ToString()));
+        }
+        const string key = "disbursement-vs-payment";
+
+        // A chain whose debit/credit/amount/purpose columns happen to match a Disbursement leg's own shape
+        // is only valid as a Disbursement in the first place (a Payment chain would reject the "Disbursement"
+        // purpose, decision #53) — so the "same legs" half of this test reuses the same Disbursement leg list,
+        // varying only ChainKind itself between the two calls.
+        var first = await PostRequestAsync(new ChainRequest(
+            key, "Rent", [DisbursementLeg(A, 100m)], ChainKind: ChainKind.Disbursement));
+        Assert.Equal("Success", first.Status);
+
+        await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(() => PostRequestAsync(new ChainRequest(
+            key, "Rent", [DisbursementLeg(A, 100m)], ChainKind: ChainKind.Collection)));
+
+        // Confirmed by construction: ChainKind.Collection with a Disbursement-shaped leg list is itself
+        // invalid per the validator (a Collection chain requires Collection-purpose legs) — this call bypasses
+        // ChainRequestValidator entirely (ChainService.PostAsync does not re-run it), so the 409 above is
+        // proof the HASH comparison itself is what rejects it, not a validator-level purpose check beating
+        // the hash check to it. Confirmed no second chain or leg was created:
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Equal(1, await verifyCtx.TransactionChains.CountAsync(c => c.IdempotencyKey == key));
+        Assert.Equal(100m, await BalanceAsync(A));
+    }
+
+    // The legacy-hash bridge (ChainService.LegacyHashLegs): a chain whose stored RequestHash was computed
+    // with the pre-decision-#53 formula (legs only, no ChainKind — every real chain before this decision
+    // shipped) must still replay correctly on an exact retry, not get a false 409 just because the hash
+    // formula changed under it.
+    [Fact]
+    public async Task SameKey_PreDecision53Chain_StillReplays_NotA409()
+    {
+        await SeedAsync();
+        await FundAsync(A, 1000m);
+        const string key = "legacy-hash-replay";
+
+        var original = await PostAsync(key, Leg(A, B, 100m));
+        Assert.Equal("Success", original.Status);
+
+        // Simulate a chain stored before decision #53 shipped: overwrite its RequestHash with what the OLD
+        // formula (legs only, no ChainKind) would have produced — exactly what a real pre-#53 row has on disk.
+        await using (var ctx = _fixture.CreateContext())
+        {
+            var stored = await ctx.TransactionChains.SingleAsync(c => c.IdempotencyKey == key);
+            var legacyHash = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new[]
+                {
+                    new[] { A, B, "100", "Principal" },
+                }))));
+            stored.RequestHash = legacyHash;
+            await ctx.SaveChangesAsync();
+        }
+
+        var retry = await PostAsync(key, Leg(A, B, 100m));
+
+        Assert.Equal(original.Reference, retry.Reference);
+        Assert.Equal(900m, await BalanceAsync(A));
+        await using var verifyCtx = _fixture.CreateContext();
+        Assert.Equal(1, await verifyCtx.TransactionChains.CountAsync(c => c.IdempotencyKey == key));
+    }
 }
